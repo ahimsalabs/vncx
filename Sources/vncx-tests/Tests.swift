@@ -1,3 +1,6 @@
+// Copyright 2026 Ahimsa Labs
+// SPDX-License-Identifier: Apache-2.0
+
 import Foundation
 import CommonCrypto
 import CryptoKit
@@ -138,7 +141,10 @@ struct DecoderTests {
         expect(fb2.row(0)[0] == white && fb2.row(1)[35] == white && fb2.row(1)[36] == red && fb2.row(1)[63] == red, "plain RLE")
 
         let fb3 = Framebuffer(width: 5, height: 1)
-        let palRLE: [UInt8] = [130 + 1] + bgr(green) + bgr(blue) + bgr(white) + [0x80 | 1, 2, 0, 2]
+        // Built in steps: one long `+` chain times out Swift 6.0's type checker.
+        var palRLE: [UInt8] = [131] // palette RLE, 3 colours
+        palRLE += bgr(green) + bgr(blue) + bgr(white)
+        palRLE += [0x81, 2, 0, 2] // index 1 run of 3, then 0, then 2
         let c4 = deflate(palRLE)
         try ZRLEDecoder().decode(Transport(bytes: be32(c4.count) + c4), fb3, x: 0, y: 0, w: 5, h: 1)
         expect(Array(UnsafeBufferPointer(start: fb3.row(0), count: 5)) == [blue, blue, blue, green, white], "palette RLE")
