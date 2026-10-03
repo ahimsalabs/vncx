@@ -48,4 +48,12 @@ package final class ZStream {
         output.removeSubrange(produced...)
         return output
     }
+
+    /// One-shot zlib compression (a complete zlib stream).
+    package static func deflate(_ input: [UInt8]) -> [UInt8] {
+        var outLen = compressBound(uLong(input.count))
+        var out = [UInt8](repeating: 0, count: Int(outLen))
+        guard compress2(&out, &outLen, input, uLong(input.count), 6) == Z_OK else { return [] }
+        return Array(out[0..<Int(outLen)])
+    }
 }

@@ -16,6 +16,7 @@ package enum Encoding {
     package static let lastRect: Int32 = -224
     package static let extendedDesktopSize: Int32 = -308
     package static let desktopName: Int32 = -307
+    package static let extendedClipboard = Int32(bitPattern: 0xC0A1_E5CE)
     package static func jpegQuality(_ q: Int) -> Int32 { -32 + Int32(q) }
     package static func compressLevel(_ l: Int) -> Int32 { -256 + Int32(l) }
 }
@@ -110,6 +111,21 @@ package final class RFBClient: @unchecked Sendable {
     private let lock = NSLock()
     private var _supportsResize = false
     private var serverVersion = (3, 3)
+
+    // Extended clipboard state (guarded by `lock`).
+    private var extClipboardActive = false
+    private var localClipboardText: String?
+    private enum Clip {
+        static let text: UInt32 = 1 << 0
+        static let caps: UInt32 = 1 << 24
+        static let request: UInt32 = 1 << 25
+        static let peek: UInt32 = 1 << 26
+        static let notify: UInt32 = 1 << 27
+        static let provide: UInt32 = 1 << 28
+    }
+
+    /// True once the server has announced Extended Clipboard support (UTF-8 clipboard).
+    package var supportsUnicodeClipboard: Bool { lock.withLock { extClipboardActive } }
 
     /// Credentials actually used for a successful login (so the UI can offer to save them).
     package private(set) var usedCredentials: Credentials?
@@ -271,10 +287,17 @@ package final class RFBClient: @unchecked Sendable {
             case 2: onEvent(.bell)
             case 3:
                 try transport.skip(3)
-                let len = Int(try transport.u32())
+                let signed = try transport.s32()
+                if signed < 0 {
+                    let len = Int(signed.magnitude)
+                    guard len <= 64 << 20 else { throw RFBError.protocol("clipboard message too large") }
+                    try extendedClipboard(try transport.bytes(len))
+                    continue
+                }
+                let len = Int(signed)
                 let bytes = try transport.bytes(min(len, 16 << 20))
                 if len > 16 << 20 { try transport.skip(len - (16 << 20)) }
-                // RFB clipboard text is ISO 8859-1.
+                // Classic RFB clipboard text is ISO 8859-1.
                 onEvent(.clipboard(String(bytes: bytes, encoding: .isoLatin1) ?? ""))
             default:
                 throw RFBError.protocol("unknown server message type \(type)")
@@ -361,6 +384,61 @@ package final class RFBClient: @unchecked Sendable {
         onEvent(.cursor(RemoteCursor(image: image, hotspot: CGPoint(x: x, y: y))))
     }
 
+    // MARK: Extended clipboard
+
+    private func extendedClipboard(_ payload: [UInt8]) throws {
+        guard payload.count >= 4 else { return }
+        let flags = UInt32(payload[0]) << 24 | UInt32(payload[1]) << 16 | UInt32(payload[2]) << 8 | UInt32(payload[3])
+        if flags & Clip.caps != 0 {
+            lock.withLock { extClipboardActive = true }
+            // Advertise text only, with a 0-byte unsolicited limit so changes always arrive as notify (per spec advice).
+            sendExtendedClipboard(Clip.caps | Clip.text | Clip.request | Clip.peek | Clip.notify | Clip.provide, body: be32(0))
+            // Offer whatever the local clipboard held before the server told us it supports this.
+            if lock.withLock({ localClipboardText }) != nil { sendExtendedClipboard(Clip.notify | Clip.text) }
+            return
+        }
+        if flags & Clip.request != 0, flags & Clip.text != 0 {
+            let text = lock.withLock { localClipboardText } ?? ""
+            sendProvide(text)
+        } else if flags & Clip.peek != 0 {
+            let has = lock.withLock { localClipboardText } != nil
+            sendExtendedClipboard(Clip.notify | (has ? Clip.text : 0))
+        } else if flags & Clip.notify != 0 {
+            if flags & Clip.text != 0 { sendExtendedClipboard(Clip.request | Clip.text) }
+        } else if flags & Clip.provide != 0 {
+            // A fresh zlib stream holding (u32 size, data) for each format bit set, lowest bit first.
+            let data = try payload.withUnsafeBytes { raw in
+                try ZStream().inflate(UnsafeRawBufferPointer(rebasing: raw[4...]), expected: max(payload.count * 4, 4096))
+            }
+            var offset = 0
+            for bit in 0..<16 where flags & (1 << UInt32(bit)) != 0 {
+                guard offset + 4 <= data.count else { break }
+                let size = Int(UInt32(data[offset]) << 24 | UInt32(data[offset + 1]) << 16 | UInt32(data[offset + 2]) << 8 | UInt32(data[offset + 3]))
+                offset += 4
+                guard offset + size <= data.count else { break }
+                if bit == 0 {
+                    var bytes = Array(data[offset..<offset + size])
+                    while bytes.last == 0 { bytes.removeLast() }
+                    let text = String(decoding: bytes, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n")
+                    onEvent(.clipboard(text))
+                }
+                offset += size
+            }
+        }
+    }
+
+    private func sendProvide(_ text: String) {
+        let utf8 = Array(text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\r\n").utf8) + [0]
+        let stream = be32(UInt32(utf8.count)) + utf8
+        sendExtendedClipboard(Clip.provide | Clip.text, body: ZStream.deflate(stream))
+    }
+
+    private func sendExtendedClipboard(_ flags: UInt32, body: [UInt8] = []) {
+        let payload = be32(flags) + body
+        let length = -Int32(payload.count)
+        transport.send([6, 0, 0, 0] + be32(UInt32(bitPattern: length)) + payload)
+    }
+
     // MARK: Client messages (thread-safe)
 
     private func sendPixelFormat() {
@@ -382,7 +460,7 @@ package final class RFBClient: @unchecked Sendable {
         }
         encs += [Encoding.hextile, Encoding.zlib, Encoding.rre, Encoding.raw,
                  Encoding.cursor, Encoding.desktopSize, Encoding.extendedDesktopSize,
-                 Encoding.lastRect, Encoding.desktopName]
+                 Encoding.lastRect, Encoding.desktopName, Encoding.extendedClipboard]
         switch options.quality {
         case .lossless: encs += [Encoding.compressLevel(1)]
         case .balanced: encs += [Encoding.jpegQuality(8), Encoding.compressLevel(2)]
@@ -407,6 +485,12 @@ package final class RFBClient: @unchecked Sendable {
     }
 
     package func sendClipboard(_ text: String) {
+        let extended = lock.withLock { () -> Bool in localClipboardText = text; return extClipboardActive }
+        if extended {
+            // Announce; the server asks for the data when it wants it.
+            sendExtendedClipboard(Clip.notify | Clip.text)
+            return
+        }
         // Latin-1 is the only universally supported clipboard encoding; drop what doesn't fit.
         let bytes = Array(text.unicodeScalars.compactMap { $0.value < 256 ? UInt8($0.value) : UInt8(ascii: "?") }.prefix(1 << 20))
         transport.send([6, 0, 0, 0] + be32(UInt32(bytes.count)) + bytes)

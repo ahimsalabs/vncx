@@ -22,6 +22,7 @@ let frames = Int(option("--frames") ?? "3") ?? 3
 let seconds = Double(option("--seconds") ?? "20") ?? 20
 let out = option("--out")
 let resize = option("--resize")
+let clipboardOut = option("--clipboard")
 let move = args.contains("--move")
 args.removeAll { $0 == "--move" }
 guard let target = args.first, let addr = Address.parse(target) else {
@@ -75,6 +76,10 @@ client = RFBClient(options: options, credentialProvider: { req in
             print("requesting desktop size \(w)x\(h) (supported=\(client.supportsRemoteResize))")
             client.requestDesktopSize(width: w, height: h)
         }
+        if updates == 1, let clip = clipboardOut {
+            print("sending clipboard \(clip.debugDescription) (unicode=\(client.supportsUnicodeClipboard))")
+            client.sendClipboard(clip)
+        }
         if updates == 1 && move {
             // Sweep the pointer diagonally across the desktop so the server sends cursor shape changes.
             DispatchQueue.global().async {
@@ -88,7 +93,9 @@ client = RFBClient(options: options, credentialProvider: { req in
         if updates >= frames && (resize == nil || resized) { client.stop() }
     case .cursor(let c):
         if let c { print("cursor \(c.image.width)x\(c.image.height) hotspot \(c.hotspot)") }
-    case .bell, .clipboard, .nameChanged:
+    case .clipboard(let text):
+        print("clipboard from server: \(text.debugDescription)")
+    case .bell, .nameChanged:
         break
     case .disconnected(let err):
         failure = err
