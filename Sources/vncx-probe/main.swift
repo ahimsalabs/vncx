@@ -23,6 +23,8 @@ let seconds = Double(option("--seconds") ?? "20") ?? 20
 let out = option("--out")
 let resize = option("--resize")
 let clipboardOut = option("--clipboard")
+/// Comma-separated hex keysyms pressed in order and released in reverse, e.g. ffeb,ff52 for Super+Up.
+let keyCombo = option("--keys")
 let move = args.contains("--move")
 args.removeAll { $0 == "--move" }
 guard let target = args.first, let addr = Address.parse(target) else {
@@ -77,6 +79,12 @@ client = RFBClient(options: options, credentialProvider: { req in
             client.requestDesktopSize(width: w, height: h)
         }
         if updates == 2 { client.measureLatency() }
+        if updates == 2, let keyCombo {
+            let syms = keyCombo.split(separator: ",").compactMap { UInt32($0, radix: 16) }
+            print("sending key combo \(syms.map { String($0, radix: 16) })")
+            syms.forEach { client.sendKey($0, down: true) }
+            syms.reversed().forEach { client.sendKey($0, down: false) }
+        }
         if updates == 1, let clip = clipboardOut {
             print("sending clipboard \(clip.debugDescription) (unicode=\(client.supportsUnicodeClipboard))")
             client.sendClipboard(clip)

@@ -104,7 +104,7 @@ final class RemoteView: MTKView {
         }
         if let text = pb.string(forType: .string), !text.isEmpty {
             window?.makeFirstResponder(self)
-            session.handleDroppedText(text)
+            session.handleDroppedText(text, type: NSEvent.modifierFlags.contains(.option))
             return true
         }
         return false

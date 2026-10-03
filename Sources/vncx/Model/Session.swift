@@ -70,20 +70,35 @@ final class Session: Identifiable {
         }
     }
 
-    /// Text dropped on the remote view is typed on the remote computer.
-    func handleDroppedText(_ text: String) {
-        guard !viewOnly, phase == .connected else { return }
-        let limited = String(text.prefix(20_000))
-        // Servers can only type characters their keyboard layout has. Beyond Latin-1, hand the text over
-        // through the Unicode clipboard instead and let the user paste it.
-        let typeable = limited.unicodeScalars.allSatisfy { $0.value < 0x100 }
-        if !typeable, let client, client.supportsUnicodeClipboard {
-            client.sendClipboard(limited)
-            showBanner(Banner(text: "Text copied to the remote clipboard. Paste it there."), for: 4)
+    /// Text dropped on the remote view is pasted there: it goes onto the remote clipboard, then the paste shortcut
+    /// is sent. With `type` (Option held while dropping) it is typed key by key instead.
+    func handleDroppedText(_ text: String, type: Bool = false) {
+        guard !viewOnly, phase == .connected, let client else { return }
+        let limited = String(text.prefix(1_000_000))
+        // The classic clipboard is Latin-1 only; without the Unicode extension, other text can only be typed.
+        let latin1 = limited.unicodeScalars.allSatisfy { $0.value < 0x100 }
+        if type || (!client.supportsUnicodeClipboard && !latin1) {
+            let typed = String(limited.prefix(20_000))
+            view?.type(typed)
+            showBanner(Banner(text: "Typed \(typed.count) characters."), for: 2)
             return
         }
-        view?.type(limited)
-        showBanner(Banner(text: "Typed \(limited.count) characters."), for: 2)
+        client.sendClipboard(limited)
+        // Give the server a moment to take clipboard ownership before the application asks for it.
+        let keys = pasteKeys
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.view?.sendKeyCombo(keys) }
+        showBanner(Banner(text: "Pasted \(limited.count) characters. Hold ⌥ while dropping to type instead."), for: 3)
+    }
+
+    private var pasteKeys: [UInt32] {
+        let m = KeyMapping.Modifier.self
+        switch config.pasteShortcut {
+        case .automatic: return client?.isAppleServer == true ? [Preferences.shared.commandKey.left, 0x76] : [m.controlL, 0x76]
+        case .controlV: return [m.controlL, 0x76]
+        case .commandV: return [Preferences.shared.commandKey.left, 0x76]
+        case .controlShiftV: return [m.controlL, m.shiftL, 0x56]
+        case .shiftInsert: return [m.shiftL, 0xff63]
+        }
     }
 
     /// Current pinch zoom of the main view (1 = none), mirrored from the view for the UI.

@@ -27,6 +27,34 @@ enum DebugDump {
 
     private static var actionSource: DispatchSourceSignal?
 
+    /// Feeds synthetic AppKit events for a combo like "cmd+up" through the same path AppKit uses for real keys:
+    /// modifiers as flagsChanged, the key via performKeyEquivalent first and then the first responder.
+    @MainActor static func synthesize(_ spec: String, window: NSWindow, view: RemoteView) {
+        let mods: [String: (code: UInt16, flag: NSEvent.ModifierFlags)] = [
+            "cmd": (55, .command), "ctrl": (59, .control), "opt": (58, .option), "shift": (56, .shift)]
+        let keys: [String: (code: UInt16, chars: String)] = [
+            "up": (126, "\u{F700}"), "down": (125, "\u{F701}"), "left": (123, "\u{F702}"), "right": (124, "\u{F703}"),
+            "t": (17, "t"), "tab": (48, "\t"), "space": (49, " ")]
+        let parts = spec.split(separator: "+").map(String.init)
+        guard let keyName = parts.last, let key = keys[keyName] else { return }
+        window.makeFirstResponder(view)
+        var flags: NSEvent.ModifierFlags = []
+        func ev(_ type: NSEvent.EventType, _ code: UInt16, _ chars: String, _ f: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: type, location: .zero, modifierFlags: f, timestamp: ProcessInfo.processInfo.systemUptime,
+                             windowNumber: window.windowNumber, context: nil, characters: chars,
+                             charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code)!
+        }
+        for m in parts.dropLast() { guard let mod = mods[m] else { continue }
+            flags.insert(mod.flag); window.sendEvent(ev(.flagsChanged, mod.code, "", flags)) }
+        var keyFlags = flags
+        if key.chars.unicodeScalars.first!.value >= 0xF700 { keyFlags.formUnion([.function, .numericPad]) }
+        let down = ev(.keyDown, key.code, key.chars, keyFlags)
+        if !window.performKeyEquivalent(with: down) { window.sendEvent(down) }
+        window.sendEvent(ev(.keyUp, key.code, key.chars, keyFlags))
+        for m in parts.dropLast().reversed() { guard let mod = mods[m] else { continue }
+            flags.remove(mod.flag); window.sendEvent(ev(.flagsChanged, mod.code, "", flags)) }
+    }
+
     @MainActor static func runAction(_ dir: URL) {
         guard let action = try? String(contentsOf: dir.appendingPathComponent("action"), encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -39,6 +67,8 @@ enum DebugDump {
             session.handleDroppedFiles(action.dropFirst(7).split(separator: "|").map { URL(fileURLWithPath: String($0)) })
         } else if action.hasPrefix("type:") {
             session.handleDroppedText(String(action.dropFirst(5)).replacingOccurrences(of: "\\n", with: "\n"))
+        } else if action.hasPrefix("keys:"), let window = session.windowController?.window, let view = session.view {
+            synthesize(String(action.dropFirst(5)), window: window, view: view)
         } else if action == "onewindow" {
             session.showAllDisplaysInOneWindow()
         }

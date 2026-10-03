@@ -3,6 +3,21 @@ import Foundation
 import Observation
 import AppKit
 
+/// The shortcut sent to the remote to paste dropped text.
+enum PasteShortcut: String, Codable, CaseIterable, Identifiable {
+    case automatic, controlV, commandV, controlShiftV, shiftInsert
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .automatic: return "Automatic (⌘V on Macs, Ctrl+V elsewhere)"
+        case .controlV: return "Ctrl+V"
+        case .commandV: return "Command+V"
+        case .controlShiftV: return "Ctrl+Shift+V (terminals)"
+        case .shiftInsert: return "Shift+Insert"
+        }
+    }
+}
+
 enum LocalCursorMode: String, Codable, CaseIterable, Identifiable {
     case arrow, dot, hidden
     var id: String { rawValue }
@@ -35,6 +50,7 @@ struct SavedConnection: Codable, Identifiable, Hashable {
     var wake = WakeSettings()
     /// The remote display last chosen for the main window ("number:WxH"), for multi-monitor servers.
     var preferredDisplay: String?
+    var pasteShortcut: PasteShortcut = .automatic
 
     /// The SSH destination to use (defaults to the VNC host).
     var sshDestination: String {
@@ -46,7 +62,7 @@ struct SavedConnection: Codable, Identifiable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, host, port, username, bonjourName, quality, scaling, viewOnly, remoteResizeRetina
-        case lastConnected, lastResolution, localCursor, ssh, wake, preferredDisplay
+        case lastConnected, lastResolution, localCursor, ssh, wake, preferredDisplay, pasteShortcut
     }
 
     /// Tolerant decoding: any missing or unreadable key keeps its default, so adding settings never
@@ -70,6 +86,7 @@ struct SavedConnection: Codable, Identifiable, Hashable {
         ssh = get(.ssh, ssh)
         wake = get(.wake, wake)
         preferredDisplay = get(.preferredDisplay, preferredDisplay)
+        pasteShortcut = get(.pasteShortcut, pasteShortcut)
     }
 
     var title: String { name.isEmpty ? (bonjourName ?? Address(host: host, port: port).display) : name }

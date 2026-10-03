@@ -289,6 +289,9 @@ struct ConnectionEditor: View {
                         ForEach(Quality.allCases) { Text($0.label).tag($0) }
                     }
                     Toggle("View only", isOn: $connection.viewOnly)
+                    Picker("Paste dropped text with", selection: $connection.pasteShortcut) {
+                        ForEach(PasteShortcut.allCases) { Text($0.label).tag($0) }
+                    }
                     Picker("Local cursor", selection: $connection.localCursor) {
                         ForEach(LocalCursorMode.allCases) { Text($0.label).tag($0) }
                     }

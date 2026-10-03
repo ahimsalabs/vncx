@@ -13,7 +13,7 @@ A native, simple VNC viewer for macOS, built with SwiftUI, AppKit, and Metal.
 - **Survives sleep and network changes.** Dropped connections reconnect with backoff, reusing the session's credentials.
 - **SSH.** Tunnel VNC through SSH, start the VNC server on demand if it isn't running (WayVNC and TigerVNC presets), and drop files on the window to upload them. Uses the system `ssh`, so `~/.ssh/config`, keys and agents apply.
 - **Wake-on-LAN.** Wakes a sleeping computer before connecting, optionally through a relay machine on its LAN.
-- **Mac conventions.** Keychain passwords, Bonjour discovery, `vnc://` URLs, native full screen and window tabs, Unicode clipboard sync, ⌘-shortcut forwarding, full keyboard capture (⌘Tab, ⌘Space, Mission Control) in full screen, a menu bar item, and drag and drop of text.
+- **Mac conventions.** Keychain passwords, Bonjour discovery, `vnc://` URLs, native full screen and window tabs, Unicode clipboard sync, ⌘-shortcut forwarding, full keyboard capture (⌘Tab, ⌘Space, Mission Control) in full screen, a menu bar item, and drag and drop: dropped text is pasted (hold ⌥ to type it instead).
 - **Launcher.** Recent computers appear with thumbnails of their last screen.
 
 ## Build and run
@@ -60,4 +60,5 @@ Keys are sent as X11 keysyms. Command maps to Super by default; you can change t
 - `VNCX_DEBUG_DIR=/some/dir` makes a run ephemeral: it stays in the background, never takes focus, and doesn't touch saved connections. `kill -USR1 <pid>` dumps window and session state, offscreen renders, and SwiftUI captures into the directory. `kill -USR2 <pid>` runs the action in `<dir>/action`: `select:N`, `openall`, `onewindow`, `upload:/a|/b`, or `type:text\n`.
 - `VNCX_OPEN_JSON=/path/connection.json` opens a fully specified connection, using the same format as `connections.json`.
 - `TRACE=1 vncx-probe host` prints every rectangle, screen layout and cursor the server sends, plus a stats summary.
+- niri (through 26.04) ignores its own key bindings for keys from virtual keyboards, which is how WayVNC types (niri issue #403, PR #4548). Super+arrow and other niri shortcuts therefore don't work over WayVNC, from any VNC client. Keys still reach applications.
 - Not supported yet: VeNCrypt/TLS security types, and Apple's private Screen Sharing extensions (macOS servers send no cursor shapes to standard clients). Tailscale already encrypts traffic for the intended use.
