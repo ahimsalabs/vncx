@@ -21,7 +21,7 @@ final class Preferences {
         didSet { defaults.set(keyboardCapture.rawValue, forKey: "keyboardCapture"); KeyboardCapture.shared.update() }
     }
     var showMenuBarItem: Bool {
-        didSet { defaults.set(showMenuBarItem, forKey: "showMenuBarItem") }
+        didSet { defaults.set(showMenuBarItem, forKey: "showMenuBarItem"); MenuBarController.shared.update() }
     }
     var syncClipboard: Bool {
         didSet { defaults.set(syncClipboard, forKey: "syncClipboard") }

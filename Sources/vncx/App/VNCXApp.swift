@@ -11,6 +11,14 @@ final class AppState {
     static let shared = AppState()
     var newConnectionRequests = 0
     var focusAddressRequests = 0
+
+    /// SwiftUI's openWindow, captured by the menu commands so AppKit code (the menu bar item) can open the launcher.
+    @ObservationIgnored var openLauncher: (() -> Void)?
+
+    func showLauncher() {
+        NSApp.activate()
+        openLauncher?()
+    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -37,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSWindow.allowsAutomaticWindowTabbing = true
         BonjourBrowser.shared.start()
+        MenuBarController.shared.update()
         DebugDump.installIfRequested()
     }
 
@@ -59,12 +68,6 @@ struct VNCXApp: App {
         .commands { AppCommands() }
 
         Settings { SettingsView() }
-
-        MenuBarExtra("vncx", systemImage: "display", isInserted: Binding(
-            get: { Preferences.shared.showMenuBarItem },
-            set: { Preferences.shared.showMenuBarItem = $0 })) {
-            MenuBarContent()
-        }
     }
 }
 
@@ -73,6 +76,7 @@ struct AppCommands: Commands {
     @State private var manager = SessionManager.shared
 
     var body: some Commands {
+        let _ = { AppState.shared.openLauncher = { [openWindow] in openWindow(id: "launcher") } }()
         CommandGroup(replacing: .newItem) {
             Button("New Connection…") {
                 openWindow(id: "launcher")
@@ -147,58 +151,5 @@ struct AppCommands: Commands {
             .keyboardShortcut("d", modifiers: [.control, .command])
             .disabled(s == nil)
         }
-    }
-}
-
-struct MenuBarContent: View {
-    @Environment(\.openWindow) private var openWindow
-    @State private var manager = SessionManager.shared
-    @State private var store = ConnectionStore.shared
-    @State private var bonjour = BonjourBrowser.shared
-
-    var body: some View {
-        let open = manager.openSessions
-        if !open.isEmpty {
-            Section("Open") {
-                ForEach(open) { s in
-                    Button {
-                        manager.focus(s)
-                    } label: {
-                        Label(s.title, systemImage: s.phase == .connected ? "display" : "exclamationmark.triangle")
-                    }
-                }
-            }
-        }
-        let recent = Array(store.sorted.prefix(10))
-        if !recent.isEmpty {
-            Section("Computers") {
-                ForEach(recent) { c in
-                    Button(c.title) { SessionManager.shared.open(c) }
-                }
-            }
-        }
-        let saved = Set(store.connections.compactMap(\.bonjourName))
-        let nearby = bonjour.services.filter { !saved.contains($0.name) }
-        if !nearby.isEmpty {
-            Section("Nearby") {
-                ForEach(nearby) { s in
-                    Button(s.name) { SessionManager.shared.open(bonjour: s.name) }
-                }
-            }
-        }
-        Divider()
-        Button("Connect to Address…") {
-            openWindow(id: "launcher")
-            NSApp.activate()
-            AppState.shared.focusAddressRequests += 1
-        }
-        Button("Show Computers") {
-            openWindow(id: "launcher")
-            NSApp.activate()
-        }
-        SettingsLink { Text("Settings…") }
-        Divider()
-        Button("Quit vncx") { NSApp.terminate(nil) }
-            .keyboardShortcut("q")
     }
 }
