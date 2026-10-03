@@ -1,4 +1,6 @@
 #!/bin/sh
+# Copyright 2026 Ahimsa Labs
+# SPDX-License-Identifier: Apache-2.0
 # Two headless outputs of different sizes, side by side, with a terminal on each.
 export XDG_RUNTIME_DIR=/tmp/xdg; mkdir -p -m 700 $XDG_RUNTIME_DIR
 export WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman

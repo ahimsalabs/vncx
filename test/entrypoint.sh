@@ -1,4 +1,6 @@
 #!/bin/sh
+# Copyright 2026 Ahimsa Labs
+# SPDX-License-Identifier: Apache-2.0
 # Starts Xtigervnc and a few X clients so there's something to look at.
 GEOMETRY="${GEOMETRY:-2560x1440}"
 Xtigervnc :0 -rfbport 5900 -geometry "$GEOMETRY" -depth 24 -rfbauth /root/.vnc/passwd \

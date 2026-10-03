@@ -1,3 +1,6 @@
+// Copyright 2026 Ahimsa Labs
+// SPDX-License-Identifier: Apache-2.0
+
 // Minimal test runner. Swift Testing doesn't discover tests under the Command Line Tools toolchain, so the unit
 // tests run as a plain executable: `swift run vncx-tests` (or `task test`).
 import Foundation

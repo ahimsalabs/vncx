@@ -1,3 +1,6 @@
+// Copyright 2026 Ahimsa Labs
+// SPDX-License-Identifier: Apache-2.0
+
 import Foundation
 
 /// A parsed connection address. Accepts `host`, `host:port`, `host:display` (display < 100 means 5900+display),

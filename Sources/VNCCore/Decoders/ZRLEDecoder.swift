@@ -1,3 +1,6 @@
+// Copyright 2026 Ahimsa Labs
+// SPDX-License-Identifier: Apache-2.0
+
 import Foundation
 
 /// ZRLE (encoding 16): a zlib stream of 64x64 tiles, each raw, solid, packed-palette, or run-length encoded.

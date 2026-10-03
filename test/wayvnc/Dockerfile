@@ -1,3 +1,6 @@
+# Copyright 2026 Ahimsa Labs
+# SPDX-License-Identifier: Apache-2.0
+
 # Headless sway + WayVNC in --desktop mode with two outputs, for testing multi-screen layouts,
 # cursor shapes, and clipboard against a modern neatvnc server. Arch ships current wayvnc (0.10+).
 # amd64 only (Arch has no arm64 image); runs under emulation on Apple Silicon.

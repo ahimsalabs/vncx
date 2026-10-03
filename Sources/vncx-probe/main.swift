@@ -1,3 +1,6 @@
+// Copyright 2026 Ahimsa Labs
+// SPDX-License-Identifier: Apache-2.0
+
 // vncx-probe: connects to a VNC server headlessly, receives frames, and writes a PNG of the framebuffer.
 // Exercises auth and decoders against real servers without the UI.
 //

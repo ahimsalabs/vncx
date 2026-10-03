@@ -53,3 +53,7 @@ vncx is young. It has been exercised against TigerVNC, WayVNC 0.10, macOS Screen
 - **No remote cursor on macOS servers.** macOS Screen Sharing doesn't send cursor shapes to standard VNC clients, so vncx shows a local cursor.
 - **niri shortcuts don't work over WayVNC.** niri ignores its own key bindings for keys from virtual keyboards, which is how WayVNC types. See [server notes](docs/servers.md#wayvnc).
 - **No file transfer over VNC.** VNC has no standard file transfer. vncx uploads dropped files over SSH instead.
+
+## License
+
+vncx is licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 Ahimsa Labs.

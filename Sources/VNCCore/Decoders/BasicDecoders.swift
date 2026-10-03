@@ -1,3 +1,6 @@
+// Copyright 2026 Ahimsa Labs
+// SPDX-License-Identifier: Apache-2.0
+
 import Foundation
 
 /// Raw, CopyRect, RRE, Hextile and Zlib decoding. All assume the negotiated 32bpp little-endian pixel format.

@@ -1,3 +1,6 @@
+# Copyright 2026 Ahimsa Labs
+# SPDX-License-Identifier: Apache-2.0
+
 # Minimal Linux VNC server for exercising VNC password auth and the Tight/ZRLE/Hextile/... decoders.
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \

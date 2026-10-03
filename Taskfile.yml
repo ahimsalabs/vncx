@@ -30,6 +30,7 @@ tasks:
       - cp "$(swift build -c release --show-bin-path)/{{.APP}}" {{.BUNDLE}}/Contents/MacOS/{{.APP}}
       - cp Resources/Info.plist {{.BUNDLE}}/Contents/Info.plist
       - cp {{.BUILD_DIR}}/AppIcon.icns {{.BUNDLE}}/Contents/Resources/AppIcon.icns
+      - cp LICENSE NOTICE {{.BUNDLE}}/Contents/Resources/
       - codesign --force --sign "{{.SIGN_IDENTITY}}" --entitlements Resources/vncx.entitlements {{.BUNDLE}}
       - echo "Built {{.BUNDLE}}"
 

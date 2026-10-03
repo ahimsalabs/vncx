@@ -1,3 +1,6 @@
+// Copyright 2026 Ahimsa Labs
+// SPDX-License-Identifier: Apache-2.0
+
 import Foundation
 
 /// Minimal fixed-width modular arithmetic for finite-field Diffie-Hellman.

@@ -1,3 +1,6 @@
+// Copyright 2026 Ahimsa Labs
+// SPDX-License-Identifier: Apache-2.0
+
 import Foundation
 
 /// Bounds-checked sequential reader over an in-memory buffer (decompressed ZRLE/Tight data).
