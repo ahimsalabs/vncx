@@ -82,6 +82,32 @@ final class RemoteView: MTKView {
             renderer = Renderer(device: device, pixelFormat: colorPixelFormat)
             delegate = renderer
         }
+        registerForDraggedTypes([.fileURL, .string])
+    }
+
+    // MARK: Drag and drop
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard !viewOnly, session?.phase == .connected else { return [] }
+        let pb = sender.draggingPasteboard
+        if pb.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) { return .copy }
+        if pb.canReadObject(forClasses: [NSString.self], options: nil) { return .copy }
+        return []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let session else { return false }
+        let pb = sender.draggingPasteboard
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            session.handleDroppedFiles(urls)
+            return true
+        }
+        if let text = pb.string(forType: .string), !text.isEmpty {
+            window?.makeFirstResponder(self)
+            session.handleDroppedText(text)
+            return true
+        }
+        return false
     }
 
     required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }

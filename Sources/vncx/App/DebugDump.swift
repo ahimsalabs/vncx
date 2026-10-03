@@ -35,6 +35,10 @@ enum DebugDump {
             session.selectedDisplay = session.displays.first { $0.number == n }?.id
         } else if action == "openall" {
             session.openAllDisplays(fullScreen: false)
+        } else if action.hasPrefix("upload:") {
+            session.handleDroppedFiles(action.dropFirst(7).split(separator: "|").map { URL(fileURLWithPath: String($0)) })
+        } else if action.hasPrefix("type:") {
+            session.handleDroppedText(String(action.dropFirst(5)).replacingOccurrences(of: "\\n", with: "\n"))
         } else if action == "onewindow" {
             session.showAllDisplaysInOneWindow()
         }
@@ -56,6 +60,7 @@ enum DebugDump {
                 let l = remote.currentLayout()
                 report += "  remote: fb=\(remote.framebuffer.map { "\($0.width)x\($0.height)" } ?? "nil") bounds=\(remote.bounds.size) drawable=\(remote.drawableSize) scaling=\(remote.scaling) layout.dst=\(l.dst) scale=\(l.scale) src=\(l.srcOrigin)\n"
                 if let s = remote.session {
+                    report += "  banner: \(String(describing: s.banner))\n"
                     report += "  displays: \(s.displays.map(\.label)) selected=\(s.display(s.selectedDisplay)?.number ?? 0) crop=\(String(describing: remote.crop))\n"
                     let r = ImageRenderer(content: StatsOverlay(stats: s.liveStats, size: s.framebufferSize, auto: s.config.quality == .auto).padding(8).background(Color.gray))
                     r.scale = 2

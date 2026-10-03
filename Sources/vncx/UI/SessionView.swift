@@ -44,6 +44,21 @@ struct SessionView: View {
             RemoteViewRepresentable(session: session, displayID: displayID)
                 .opacity(session.phase == .connected ? 1 : 0.35)
             overlay
+            if let banner = session.banner {
+                HStack(spacing: 8) {
+                    if banner.busy { ProgressView().controlSize(.small) }
+                    else { Image(systemName: banner.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(banner.isError ? Color.orange : Color.green) }
+                    Text(banner.text).lineLimit(3)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(.regularMaterial, in: Capsule())
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 18)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .allowsHitTesting(false)
+            }
             if session.showStats && session.phase == .connected {
                 StatsOverlay(stats: session.liveStats, size: session.framebufferSize, auto: session.config.quality == .auto)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)

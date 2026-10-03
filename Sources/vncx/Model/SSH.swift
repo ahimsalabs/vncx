@@ -12,6 +12,8 @@ struct SSHSettings: Codable, Hashable {
     var tunnelHost = "localhost"
     /// Shell command run on the remote when the VNC server doesn't answer. `{port}` is replaced by the VNC port.
     var startCommand = ""
+    /// Where dropped files go, relative to the remote home directory.
+    var uploadDirectory = "Downloads"
 
     static let wayvncPreset = #"pgrep -x wayvnc >/dev/null || { export XDG_RUNTIME_DIR=/run/user/$(id -u); export WAYLAND_DISPLAY=$(ls $XDG_RUNTIME_DIR | grep -m1 '^wayland-[0-9]*$'); nohup wayvnc --desktop 0.0.0.0 {port} </dev/null >/dev/null 2>&1 & sleep 1; }"#
     static let tigervncPreset = #"pgrep -x Xvnc >/dev/null || vncserver :$(({port} - 5900)) </dev/null >/dev/null 2>&1"#
@@ -25,6 +27,7 @@ struct SSHSettings: Codable, Hashable {
         tunnel = (try? c.decode(Bool.self, forKey: .tunnel)) ?? false
         tunnelHost = (try? c.decode(String.self, forKey: .tunnelHost)) ?? "localhost"
         startCommand = (try? c.decode(String.self, forKey: .startCommand)) ?? ""
+        uploadDirectory = (try? c.decode(String.self, forKey: .uploadDirectory)) ?? "Downloads"
     }
 }
 
@@ -93,6 +96,34 @@ enum SSH {
             return "SSH doesn't know this host's key yet. Connect once with ssh in Terminal to accept it.\n\(text)"
         }
         return text.isEmpty ? "ssh exited with status \(status)." : text
+    }
+}
+
+extension SSH {
+    /// Copies local files (and folders) into `directory` on the remote host with scp.
+    static func upload(_ files: [URL], to destination: String, directory: String,
+                       completion: @escaping (Result<Void, Error>) -> Void) {
+        let dir = directory.trimmingCharacters(in: .whitespaces)
+        // Create the folder first (scp won't), then copy. Paths are relative to the remote home directory.
+        run(destination, command: "mkdir -p -- '\(dir.replacingOccurrences(of: "'", with: "'\\''"))'", timeout: 30) { result in
+            if case .failure(let e) = result { completion(.failure(e)); return }
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
+            p.arguments = ["-r", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"] + files.map(\.path)
+                + ["\(destination):\(dir.isEmpty ? "." : dir)/"]
+            let err = Pipe()
+            p.standardError = err
+            p.standardOutput = FileHandle.nullDevice
+            p.standardInput = FileHandle.nullDevice
+            p.terminationHandler = { proc in
+                let e = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                DispatchQueue.main.async {
+                    if proc.terminationStatus == 0 { completion(.success(())) }
+                    else { completion(.failure(SSHError.failed(describe(e, status: proc.terminationStatus)))) }
+                }
+            }
+            do { try p.run() } catch { completion(.failure(error)) }
+        }
     }
 }
 

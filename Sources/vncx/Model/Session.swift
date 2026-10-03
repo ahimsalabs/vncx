@@ -34,6 +34,58 @@ final class Session: Identifiable {
     /// Extra detail for the connecting overlay ("Opening SSH tunnel…").
     private(set) var statusDetail: String?
     var credentialPrompt: CredentialPrompt?
+    /// A transient message shown at the bottom of the window (uploads, drop hints).
+    struct Banner: Equatable {
+        var text: String
+        var busy = false
+        var isError = false
+    }
+    var banner: Banner?
+    @ObservationIgnored private var bannerWork: DispatchWorkItem?
+
+    func showBanner(_ b: Banner?, for seconds: TimeInterval? = nil) {
+        bannerWork?.cancel()
+        banner = b
+        guard let seconds else { return }
+        let work = DispatchWorkItem { [weak self] in self?.banner = nil }
+        bannerWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
+    /// Files dropped on the remote view: upload over SSH when configured.
+    func handleDroppedFiles(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        guard config.ssh.enabled else {
+            showBanner(Banner(text: "VNC can’t transfer files. Set up SSH for this computer (Edit…) to drop files onto it.", isError: true), for: 6)
+            return
+        }
+        let dest = config.sshDestination, dir = config.ssh.uploadDirectory
+        let what = urls.count == 1 ? "“\(urls[0].lastPathComponent)”" : "\(urls.count) items"
+        showBanner(Banner(text: "Uploading \(what) to \(dest):\(dir)…", busy: true))
+        SSH.upload(urls, to: dest, directory: dir) { [weak self] result in
+            switch result {
+            case .success: self?.showBanner(Banner(text: "Uploaded \(what) to ~/\(dir) on \(dest)."), for: 4)
+            case .failure(let e): self?.showBanner(Banner(text: "Upload failed: \(e.localizedDescription)", isError: true), for: 8)
+            }
+        }
+    }
+
+    /// Text dropped on the remote view is typed on the remote computer.
+    func handleDroppedText(_ text: String) {
+        guard !viewOnly, phase == .connected else { return }
+        let limited = String(text.prefix(20_000))
+        // Servers can only type characters their keyboard layout has. Beyond Latin-1, hand the text over
+        // through the Unicode clipboard instead and let the user paste it.
+        let typeable = limited.unicodeScalars.allSatisfy { $0.value < 0x100 }
+        if !typeable, let client, client.supportsUnicodeClipboard {
+            client.sendClipboard(limited)
+            showBanner(Banner(text: "Text copied to the remote clipboard. Paste it there."), for: 4)
+            return
+        }
+        view?.type(limited)
+        showBanner(Banner(text: "Typed \(limited.count) characters."), for: 2)
+    }
+
     /// Current pinch zoom of the main view (1 = none), mirrored from the view for the UI.
     var zoom: CGFloat = 1
 
@@ -462,7 +514,7 @@ final class Session: Identifiable {
                 Keychain.setPassword(used.password, for: account, label: "vncx: \(config.title)")
             }
         }
-        if store.connection(config.id) == nil,
+        if !Self.isEphemeral, store.connection(config.id) == nil,
            let existing = store.match(host: config.host, port: config.port, username: config.username, bonjourName: config.bonjourName) {
             var merged = existing
             merged.username = config.username.isEmpty ? existing.username : config.username

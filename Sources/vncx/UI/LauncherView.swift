@@ -269,6 +269,7 @@ struct ConnectionEditor: View {
                                 .font(.system(.caption, design: .monospaced))
                                 .labelsHidden()
                         }
+                        TextField("Upload dropped files to", text: $connection.ssh.uploadDirectory, prompt: Text("Downloads"))
                         HStack {
                             Button("Test SSH") { testSSH() }.disabled(sshTesting)
                             if sshTesting { ProgressView().controlSize(.small) }
