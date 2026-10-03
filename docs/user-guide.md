@@ -22,13 +22,9 @@
 
 ## Installing
 
-Build and install from the repository:
+Download the latest build and follow the first-launch steps in the [README](../README.md#install).
 
-```sh
-task install    # builds build/vncx.app and copies it to ~/Applications
-```
-
-The app is signed ad hoc. Each build has a new signature, so macOS asks again before vncx can read its saved Keychain passwords, and resets the Accessibility permission used for keyboard capture. An installed copy that you don't rebuild only asks once.
+Downloaded builds are all signed with the same certificate, so updating keeps vncx's Keychain access and Accessibility permission. If you build vncx yourself, it's signed ad hoc instead: each build has a new signature, so macOS asks again before vncx can read its saved Keychain passwords and resets the Accessibility permission used for keyboard capture.
 
 ## Connecting
 

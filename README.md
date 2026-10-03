@@ -16,14 +16,21 @@ vncx connects to macOS Screen Sharing, WayVNC, TigerVNC, ReFrame and other RFB (
 - **Unicode clipboard** in both directions with servers that support the extended clipboard, plus drag-and-drop pasting of text.
 - **Keyboard that behaves.** ⌘ shortcuts go to the remote. Full keyboard capture in full screen sends ⌘Tab, ⌘Space and Mission Control keys too. vncx keeps ⌃⌘ shortcuts, ⌘Q and ⌘H for itself.
 
-## Quick start
+## Install
 
-Requirements: macOS 15 or later, and a Swift 6 toolchain. The Xcode Command Line Tools are enough.
+vncx needs macOS 15 or later.
 
-```sh
-task run        # build build/vncx.app and open it
-task install    # copy it into ~/Applications
-```
+1. Download [vncx-macos.zip](https://github.com/ahimsalabs/vncx/releases/download/nightly/vncx-macos.zip), the latest build from the [nightly release](https://github.com/ahimsalabs/vncx/releases/tag/nightly).
+2. Unzip it and drag **vncx** into your Applications folder.
+3. Open vncx. The first time, macOS says it can't verify the app, because vncx isn't notarized by Apple yet. Click **Done**, open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. You only need to do this once per download.
+
+   If you prefer Terminal: `xattr -dr com.apple.quarantine /Applications/vncx.app`
+
+Updates keep their Keychain and Accessibility permissions, because every build is signed with the same certificate.
+
+To build from source instead, see [Development](docs/development.md).
+
+## Connecting
 
 Type a host name in the launcher and press Return. These address forms work:
 
@@ -35,7 +42,7 @@ host::5999                   # explicit port
 vnc://alice@mac.local:5900
 ```
 
-You can also open `vnc://` links from anywhere, or run `open build/vncx.app --args host:port`.
+You can also open `vnc://` links from anywhere, or run `open -a vncx --args host:port`.
 
 ## Documentation
 

@@ -2,6 +2,14 @@ name: build
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Replace the nightly prerelease with this build
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
 
 jobs:
   macos:
@@ -47,6 +55,7 @@ jobs:
         run: |
           NAME="vncx-$(date -u +%Y%m%d)-${GITHUB_SHA::7}"
           ditto -c -k --keepParent build/vncx.app "$NAME.zip"
+          cp "$NAME.zip" vncx-macos.zip
           echo "NAME=$NAME" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
@@ -54,3 +63,16 @@ jobs:
           name: ${{ env.NAME }}
           path: ${{ env.NAME }}.zip
           if-no-files-found: error
+
+      # A rolling prerelease gives the README a stable download URL:
+      # https://github.com/ahimsalabs/vncx/releases/download/nightly/vncx-macos.zip
+      - name: Publish nightly release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly vncx-macos.zip \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "Nightly $(date -u +%Y-%m-%d) (${GITHUB_SHA::7})" \
+            --notes "Latest build of main at $GITHUB_SHA. Signed with a self-signed certificate and not notarized; see the README for first-launch steps."

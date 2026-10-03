@@ -14,7 +14,17 @@ task test          # unit tests
 task clean
 ```
 
-The app bundle is put together by hand from the SwiftPM binary, `Resources/Info.plist`, the icon rendered by `Resources/icon.swift`, and `Resources/vncx.entitlements`, and then signed ad hoc. Each build gets a new signature. So macOS asks again for Keychain access to saved passwords, and resets the Accessibility permission used for keyboard capture. A stable signing identity avoids both.
+The app bundle is put together by hand from the SwiftPM binary, `Resources/Info.plist`, the icon rendered by `Resources/icon.swift`, and `Resources/vncx.entitlements`, and then signed. Local builds are signed ad hoc, so each build gets a new signature: macOS asks again for Keychain access to saved passwords, and resets the Accessibility permission used for keyboard capture. To sign with a stable identity, pass it to the bundle task:
+
+```sh
+task bundle SIGN_IDENTITY="<SHA-1 or name of a code-signing identity>"
+```
+
+## Release builds
+
+The `build` workflow (`.github/workflows/build.yml`) runs on demand from the Actions tab or with `gh workflow run build -R ahimsalabs/vncx`. It builds on a GitHub macOS runner, signs with a self-signed certificate, uploads the zip as a run artifact, and by default replaces the [`nightly`](https://github.com/ahimsalabs/vncx/releases/tag/nightly) prerelease.
+
+The certificate is what keeps permissions across updates: the designated requirement is `certificate leaf = H"e3783d59…"`, so Keychain and Accessibility grants survive new builds. Replacing the certificate resets them for every user. It lives in the `MACOS_CERT_P12` and `MACOS_CERT_PASS` repository secrets, with the original kept offline by the maintainer. Builds are not notarized, so Gatekeeper still asks for **Open Anyway** on first launch; notarization needs an Apple Developer ID.
 
 ## Code layout
 
