@@ -78,10 +78,17 @@ tasks:
       - docker run -d --name vncx-testserver -p 5901:5900 vncx-testserver
       - echo "VNC server on localhost:5901, password testpass"
 
+  wayvnc-server:
+    desc: Start headless sway + WayVNC --desktop (two outputs) in Docker on localhost:5902, no auth
+    cmds:
+      - docker build -t vncx-wayvnc test/wayvnc/
+      - docker rm -f vncx-wayvnc >/dev/null 2>&1 || true
+      - docker run -d --name vncx-wayvnc -p 5902:5900 vncx-wayvnc
+
   test-server-stop:
     desc: Stop the Docker VNC test server
     cmds:
-      - docker rm -f vncx-testserver
+      - docker rm -f vncx-testserver vncx-wayvnc
 
   clean:
     cmds:

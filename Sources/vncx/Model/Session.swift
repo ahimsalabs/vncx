@@ -42,6 +42,10 @@ final class Session: Identifiable {
     var viewOnly: Bool {
         didSet { view?.viewOnly = viewOnly; config.viewOnly = viewOnly; persistConfig() }
     }
+    /// Local cursor used when the server doesn't send cursor shapes.
+    var localCursor: LocalCursorMode {
+        didSet { view?.fallbackCursor = localCursor; config.localCursor = localCursor; persistConfig() }
+    }
     var remoteResizeUsesRetina: Bool { config.remoteResizeRetina }
 
     @ObservationIgnored private(set) var client: RFBClient?
@@ -62,6 +66,7 @@ final class Session: Identifiable {
         self.config = config
         self.scaling = config.scaling
         self.viewOnly = config.viewOnly
+        self.localCursor = config.localCursor
     }
 
     var title: String {

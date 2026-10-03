@@ -140,14 +140,14 @@ final class SessionManager {
         guard let addr = Address.parse(address) else { return false }
         let store = ConnectionStore.shared
         let config = store.match(host: addr.host, port: addr.port, username: addr.username, bonjourName: nil)
-            ?? SavedConnection(host: addr.host, port: addr.port, username: addr.username)
+            ?? { var c = SavedConnection(); c.host = addr.host; c.port = addr.port; c.username = addr.username; return c }()
         open(config)
         return true
     }
 
     func open(bonjour name: String) {
         let config = ConnectionStore.shared.match(host: "", port: 5900, username: "", bonjourName: name)
-            ?? SavedConnection(name: name, bonjourName: name)
+            ?? { var c = SavedConnection(); c.name = name; c.bonjourName = name; return c }()
         open(config)
     }
 

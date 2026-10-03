@@ -65,7 +65,8 @@ package struct RemoteCursor: @unchecked Sendable {
     package let hotspot: CGPoint
 }
 
-package struct ScreenLayout: Sendable {
+package struct ScreenLayout: Sendable, CustomStringConvertible {
+    package var description: String { "screen id=\(id) \(w)x\(h)+\(x)+\(y) flags=\(flags)" }
     package var id: UInt32, x: UInt16, y: UInt16, w: UInt16, h: UInt16, flags: UInt32
 }
 
@@ -118,6 +119,8 @@ package final class RFBClient: @unchecked Sendable {
     package private(set) var isAppleServer = false
     /// Debug hook: called on the protocol thread for every rectangle header (encoding, x, y, w, h).
     package var traceRect: ((Int32, Int, Int, Int, Int) -> Void)?
+    /// Debug hook: ExtendedDesktopSize screen layouts as received (reason, status, screens).
+    package var traceScreens: ((Int, Int, [ScreenLayout]) -> Void)?
 
     package init(options: RFBOptions,
          credentialProvider: @escaping (CredentialRequest) -> Credentials?,
@@ -332,6 +335,7 @@ package final class RFBClient: @unchecked Sendable {
                                      w: try transport.u16(), h: try transport.u16(), flags: try transport.u32()))
         }
         lock.withLock { _supportsResize = true; if status == 0 { screens = list } }
+        traceScreens?(reason, status, list)
         if status == 0 { resize(w, h) }
     }
 

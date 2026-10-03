@@ -239,6 +239,10 @@ struct ConnectionEditor: View {
                         ForEach(Quality.allCases) { Text($0.label).tag($0) }
                     }
                     Toggle("View only", isOn: $connection.viewOnly)
+                    Picker("Local cursor", selection: $connection.localCursor) {
+                        ForEach(LocalCursorMode.allCases) { Text($0.label).tag($0) }
+                    }
+                    .help("Used when the server doesn’t send cursor shapes. Choose Hidden or Dot if the server draws its cursor into the picture.")
                 }
             }
             .formStyle(.grouped)

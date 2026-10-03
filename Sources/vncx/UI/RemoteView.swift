@@ -193,6 +193,14 @@ final class RemoteView: MTKView {
 
     private var hasRemoteCursorInfo = false
 
+    /// Cursor to show when the server never sends shapes (it may be drawing the cursor into the picture).
+    var fallbackCursor: LocalCursorMode = .arrow { didSet { if fallbackCursor != oldValue { rebuildCursor() } } }
+
+    private static let hiddenCursor: NSCursor = {
+        let img = NSImage(size: NSSize(width: 1, height: 1), flipped: false) { _ in true }
+        return NSCursor(image: img, hotSpot: .zero)
+    }()
+
     private func rebuildCursor() {
         if let c = remoteCursor {
             // Draw the cursor at the same scale as the desktop, within sane bounds.
@@ -201,7 +209,15 @@ final class RemoteView: MTKView {
             let img = NSImage(cgImage: c.image, size: size)
             nsCursor = NSCursor(image: img, hotSpot: NSPoint(x: c.hotspot.x * s, y: c.hotspot.y * s))
         } else {
-            nsCursor = hasRemoteCursorInfo ? Self.dotCursor : .arrow
+            if hasRemoteCursorInfo {
+                nsCursor = Self.dotCursor // the server explicitly hid its cursor
+            } else {
+                switch fallbackCursor {
+                case .arrow: nsCursor = .arrow
+                case .dot: nsCursor = Self.dotCursor
+                case .hidden: nsCursor = Self.hiddenCursor
+                }
+            }
         }
         window?.invalidateCursorRects(for: self)
         applyCursorIfInside()

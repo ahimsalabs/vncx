@@ -73,6 +73,10 @@ struct AppCommands: Commands {
             }
             .pickerStyle(.inline)
             .disabled(s == nil)
+            Picker("Local Cursor", selection: Binding(get: { s?.localCursor ?? .arrow }, set: { s?.localCursor = $0 })) {
+                ForEach(LocalCursorMode.allCases) { Text($0.label).tag($0) }
+            }
+            .disabled(s == nil)
             Toggle("View Only", isOn: Binding(get: { s?.viewOnly ?? false }, set: { s?.viewOnly = $0 }))
                 .keyboardShortcut("o", modifiers: [.control, .command])
                 .disabled(s == nil)

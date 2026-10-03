@@ -3,6 +3,18 @@ import Foundation
 import Observation
 import AppKit
 
+enum LocalCursorMode: String, Codable, CaseIterable, Identifiable {
+    case arrow, dot, hidden
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .arrow: return "Arrow"
+        case .dot: return "Dot"
+        case .hidden: return "Hidden"
+        }
+    }
+}
+
 struct SavedConnection: Codable, Identifiable, Hashable {
     var id = UUID()
     var name = ""
@@ -17,6 +29,35 @@ struct SavedConnection: Codable, Identifiable, Hashable {
     var remoteResizeRetina = false
     var lastConnected: Date?
     var lastResolution: String?
+    /// What to show locally when the server never sends cursor shapes.
+    var localCursor: LocalCursorMode = .arrow
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, host, port, username, bonjourName, quality, scaling, viewOnly, remoteResizeRetina
+        case lastConnected, lastResolution, localCursor
+    }
+
+    /// Tolerant decoding: any missing or unreadable key keeps its default, so adding settings never
+    /// invalidates connections saved by an older version.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func get<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T { ((try? c.decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback }
+        id = get(.id, id)
+        name = get(.name, name)
+        host = get(.host, host)
+        port = get(.port, port)
+        username = get(.username, username)
+        bonjourName = get(.bonjourName, bonjourName)
+        quality = get(.quality, quality)
+        scaling = get(.scaling, scaling)
+        viewOnly = get(.viewOnly, viewOnly)
+        remoteResizeRetina = get(.remoteResizeRetina, remoteResizeRetina)
+        lastConnected = get(.lastConnected, lastConnected)
+        lastResolution = get(.lastResolution, lastResolution)
+        localCursor = get(.localCursor, localCursor)
+    }
 
     var title: String { name.isEmpty ? (bonjourName ?? Address(host: host, port: port).display) : name }
     var subtitle: String {

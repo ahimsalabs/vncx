@@ -11,12 +11,14 @@ struct RemoteViewRepresentable: NSViewRepresentable {
         view.scaling = session.scaling
         view.viewOnly = session.viewOnly
         view.smoothScaling = Preferences.shared.smoothScaling
+        view.fallbackCursor = session.localCursor
         view.framebuffer = session.framebuffer
         return view
     }
 
     func updateNSView(_ view: RemoteView, context: Context) {
         view.scaling = session.scaling
+        view.fallbackCursor = session.localCursor
         view.viewOnly = session.viewOnly
         view.smoothScaling = Preferences.shared.smoothScaling
     }

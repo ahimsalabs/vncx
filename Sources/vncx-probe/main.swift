@@ -102,6 +102,9 @@ if ProcessInfo.processInfo.environment["TRACE"] != nil {
         if enc < 0 || histogram[enc]! <= 3 { print("  rect enc=\(enc) \(x),\(y) \(w)x\(h)") }
     }
 }
+client.traceScreens = { reason, status, list in
+    print("  layout reason=\(reason) status=\(status): \(list.map(\.description).joined(separator: ", "))")
+}
 client.start()
 if done.wait(timeout: .now() + seconds) == .timedOut {
     print("timeout after \(seconds)s with \(updates) updates")
