@@ -185,3 +185,16 @@ struct DecoderTests {
         expect(fb3.row(1)[1] == 0xFF01_0203 && fb3.row(2)[2] == 0xFF01_0203 && fb3.row(0)[0] != 0xFF01_0203, "tight fill")
     }
 }
+
+struct WakeTests {
+    func macParsing() {
+        let m: [UInt8] = [0xaa, 0xbb, 0xcc, 0x01, 0x02, 0x03]
+        expect(WakeOnLAN.parseMAC("aa:bb:cc:01:02:03") == m)
+        expect(WakeOnLAN.parseMAC("AA-BB-CC-01-02-03") == m)
+        expect(WakeOnLAN.parseMAC("aabb.cc01.0203") == m)
+        expect(WakeOnLAN.parseMAC("aa:bb:cc:01:02") == nil)
+        expect(WakeOnLAN.parseMAC("zz:bb:cc:01:02:03") == nil)
+        let p = WakeOnLAN.packet(m)
+        expect(p.count == 102 && p.prefix(6).allSatisfy { $0 == 0xff } && Array(p[96..<102]) == m)
+    }
+}

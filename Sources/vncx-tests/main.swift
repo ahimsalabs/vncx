@@ -33,6 +33,7 @@ run("address parsing") { AddressTests().parse() }
 run("address rejects garbage") { AddressTests().rejectsGarbage() }
 run("ZRLE tile subencodings") { try DecoderTests().zrleTiles() }
 run("Tight palette and gradient filters") { try DecoderTests().tightFilters() }
+run("Wake-on-LAN MAC parsing and packet") { WakeTests().macParsing() }
 
 print(failures == 0 ? "all tests passed" : "\(failures) failure(s)")
 exit(failures == 0 ? 0 : 1)

@@ -37,6 +37,9 @@ struct LauncherView: View {
                                 .contextMenu {
                                     Button("Connect") { SessionManager.shared.open(c) }
                                     Button("Edit…") { editing = c }
+                                    if c.wake.isConfigured {
+                                        Button("Wake Computer") { Session(config: c).sendWake() }
+                                    }
                                     Button("Duplicate") {
                                         var copy = c; copy.id = UUID(); copy.name = c.title + " copy"; copy.lastConnected = nil
                                         store.upsert(copy)
@@ -228,6 +231,17 @@ struct ConnectionEditor: View {
                         .disabled(connection.bonjourName != nil)
                     TextField("User name", text: $connection.username, prompt: Text("For macOS Screen Sharing"))
                     SecureField("Password", text: $password, prompt: Text(hadPassword ? "Saved in keychain" : "Ask when connecting"))
+                }
+                Section("Wake-on-LAN") {
+                    TextField("MAC address", text: $connection.wake.mac, prompt: Text("aa:bb:cc:dd:ee:ff"))
+                    if !connection.wake.mac.isEmpty {
+                        TextField("Broadcast address", text: $connection.wake.broadcast, prompt: Text("255.255.255.255"))
+                        TextField("Send from (SSH)", text: $connection.wake.relay, prompt: Text("Optional: a LAN machine, e.g. pi@router"))
+                        Text(connection.wake.isConfigured
+                             ? "Wake packets only reach the sleeping computer’s local network. Over Tailscale or from elsewhere, set a machine on that network to send them."
+                             : "Not a valid MAC address.")
+                            .font(.caption).foregroundStyle(connection.wake.isConfigured ? Color.secondary : Color.red)
+                    }
                 }
                 Section("SSH") {
                     Toggle("Use SSH", isOn: $connection.ssh.enabled)

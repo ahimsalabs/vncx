@@ -74,6 +74,7 @@ final class Session: Identifiable {
     @ObservationIgnored private var watchdog: DispatchWorkItem?
     @ObservationIgnored private var tunnel: SSHTunnel?
     @ObservationIgnored private var triedStartCommand = false
+    @ObservationIgnored private var wakeDeadline: Date?
     private static let retryDelays: [TimeInterval] = [1, 2, 3, 5, 8, 13, 20, 30]
     private static let maxReconnectAttempts = 30
 
@@ -261,6 +262,7 @@ final class Session: Identifiable {
         case .connected(let name, let fb, let sec):
             phase = .connected
             statusDetail = nil
+            wakeDeadline = nil
             reconnectAttempt = 0
             triedStartCommand = false
             if let used = client?.usedCredentials { sessionCredentials = used }
@@ -307,6 +309,27 @@ final class Session: Identifiable {
             if !wasConnected, unreachable, config.ssh.enabled, !config.ssh.startCommand.isEmpty, !triedStartCommand {
                 runStartCommand()
                 return
+            }
+            let preConnectFailure: Bool = {
+                switch error as? RFBError { case .authFailed?, .cancelled?, .protocol?, .auth?: return false; default: return true }
+            }()
+            if !wasConnected, preConnectFailure, config.wake.isConfigured {
+                // The computer may be asleep: wake it once, then keep retrying until the deadline.
+                if wakeDeadline == nil {
+                    wakeDeadline = Date().addingTimeInterval(120)
+                    sendWake()
+                }
+                if let deadline = wakeDeadline, Date() < deadline {
+                    statusDetail = "Waking \(config.title)…"
+                    if case .reconnecting = phase {} else { phase = .connecting }
+                    let gen = generation
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                        guard let self, self.generation == gen else { return }
+                        self.connect()
+                    }
+                    return
+                }
+                wakeDeadline = nil
             }
             if case .authFailed = error as? RFBError {
                 lastAuthFailed = true
@@ -358,6 +381,17 @@ final class Session: Identifiable {
         if force || store.connection(config.id) != nil { store.upsert(config) }
     }
 
+    /// Sends a Wake-on-LAN packet locally, and through the relay host when one is configured.
+    func sendWake(completion: ((String?) -> Void)? = nil) {
+        guard let mac = WakeOnLAN.parseMAC(config.wake.mac) else { completion?("Invalid MAC address."); return }
+        WakeOnLAN.sendLocal(mac: mac, broadcast: config.wake.broadcast)
+        let relay = config.wake.relay.trimmingCharacters(in: .whitespaces)
+        guard !relay.isEmpty else { completion?(nil); return }
+        WakeOnLAN.sendViaRelay(relay, mac: mac) { result in
+            if case .failure(let e) = result { completion?("Relay \(relay): \(e.localizedDescription)") } else { completion?(nil) }
+        }
+    }
+
     private func runStartCommand() {
         triedStartCommand = true
         let gen = generation
@@ -383,6 +417,7 @@ final class Session: Identifiable {
 
     func reconnect() {
         triedStartCommand = false
+        wakeDeadline = nil
         reconnectAttempt = 0
         connect()
     }
