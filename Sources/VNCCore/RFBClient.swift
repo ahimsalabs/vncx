@@ -19,6 +19,7 @@ package enum Encoding {
     package static let extendedClipboard = Int32(bitPattern: 0xC0A1_E5CE)
     package static let fence: Int32 = -312
     package static let continuousUpdates: Int32 = -313
+    package static let cursorWithAlpha: Int32 = -314
 
     package static func name(_ e: Int32) -> String {
         switch e {
@@ -440,6 +441,7 @@ package final class RFBClient: @unchecked Sendable {
             case Encoding.zrle: try zrle.decode(transport, fb, x: x, y: y, w: w, h: h)
             case Encoding.tight: try tight.decode(transport, fb, x: x, y: y, w: w, h: h)
             case Encoding.cursor: try cursorPseudo(x: x, y: y, w: w, h: h)
+            case Encoding.cursorWithAlpha: try cursorWithAlpha(x: x, y: y, w: w, h: h)
             case Encoding.desktopSize: resize(w, h)
             case Encoding.extendedDesktopSize: try extendedDesktopSize(reason: x, status: y, w: w, h: h)
             case Encoding.desktopName:
@@ -568,6 +570,22 @@ package final class RFBClient: @unchecked Sendable {
         transport.send([6, 0, 0, 0] + be32(UInt32(bitPattern: length)) + payload)
     }
 
+    /// RGBA, premultiplied alpha. Only Raw sub-encoding is accepted (what TigerVNC sends); other encodings
+    /// pack pixels in ways that drop the alpha byte.
+    private func cursorWithAlpha(x: Int, y: Int, w: Int, h: Int) throws {
+        let enc = try transport.s32()
+        guard enc == Encoding.raw else { throw RFBError.protocol("alpha cursor in unsupported encoding \(enc)") }
+        guard w > 0, h > 0 else { onEvent(.cursor(nil)); return }
+        let rgba = try transport.bytes(w * h * 4)
+        guard let provider = CGDataProvider(data: Data(rgba) as CFData),
+              let image = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                                  provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        else { return }
+        onEvent(.cursor(RemoteCursor(image: image, hotspot: CGPoint(x: x, y: y))))
+    }
+
     // MARK: Client messages (thread-safe)
 
     private func sendPixelFormat() {
@@ -589,7 +607,7 @@ package final class RFBClient: @unchecked Sendable {
         case .balanced, .low: encs += [Encoding.tight, Encoding.zrle]
         }
         encs += [Encoding.hextile, Encoding.zlib, Encoding.rre, Encoding.raw,
-                 Encoding.cursor, Encoding.desktopSize, Encoding.extendedDesktopSize,
+                 Encoding.cursorWithAlpha, Encoding.cursor, Encoding.desktopSize, Encoding.extendedDesktopSize,
                  Encoding.lastRect, Encoding.desktopName, Encoding.extendedClipboard,
                  Encoding.fence, Encoding.continuousUpdates]
         switch current {

@@ -32,7 +32,7 @@ guard let target = args.first, let addr = Address.parse(target) else {
 
 var options = RFBOptions(endpoint: .hostPort(host: .init(addr.host), port: .init(integerLiteral: UInt16(addr.port))),
                          username: user, password: password)
-let pseudo: [Int32] = [Encoding.cursor, Encoding.desktopSize, Encoding.extendedDesktopSize, Encoding.lastRect, Encoding.desktopName]
+let pseudo: [Int32] = [Encoding.cursorWithAlpha, Encoding.cursor, Encoding.desktopSize, Encoding.extendedDesktopSize, Encoding.lastRect, Encoding.desktopName]
 if let e = encodingName {
     let map: [String: [Int32]] = [
         "raw": [Encoding.raw], "copyrect": [Encoding.copyRect, Encoding.raw], "rre": [Encoding.rre, Encoding.raw],
