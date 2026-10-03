@@ -1,5 +1,6 @@
 import VNCCore
 import AppKit
+import Network
 import SwiftUI
 
 /// Owns a session's NSWindow. We manage these windows in AppKit (rather than a SwiftUI WindowGroup) because a VNC
@@ -119,6 +120,32 @@ final class SessionManager {
     static let shared = SessionManager()
     private var controllers: [UUID: SessionWindowController] = [:]
     var activeSession: Session?
+    @ObservationIgnored private let pathMonitor = NWPathMonitor()
+    @ObservationIgnored private var lastPath: (status: NWPath.Status, interfaces: [String])?
+
+    init() {
+        // After sleep or a network change, connections can be dead without the socket noticing.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.verifyAll(after: 1.5)
+        }
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let snapshot = (path.status, path.availableInterfaces.map(\.name))
+            DispatchQueue.main.async {
+                guard let self else { return }
+                defer { self.lastPath = snapshot }
+                guard let last = self.lastPath, last.status != snapshot.0 || last.interfaces != snapshot.1,
+                      snapshot.0 == .satisfied else { return }
+                self.verifyAll(after: 1)
+            }
+        }
+        pathMonitor.start(queue: .global(qos: .utility))
+    }
+
+    private func verifyAll(after delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            for c in self.controllers.values { c.session.verifyConnection() }
+        }
+    }
 
     func open(_ config: SavedConnection) {
         // If this saved connection is already open, just bring it forward.

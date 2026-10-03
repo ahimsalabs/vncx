@@ -58,6 +58,22 @@ struct SessionView: View {
             }
         case .connected:
             EmptyView()
+        case .reconnecting(let attempt, let reason):
+            VStack(spacing: 12) {
+                ProgressView().controlSize(.large)
+                Text("Reconnecting to \(session.config.title)…").font(.title3)
+                if let reason {
+                    Text(reason).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 420)
+                }
+                if attempt > 1 { Text("Attempt \(attempt)").font(.caption).foregroundStyle(.secondary) }
+                HStack {
+                    Button("Stop") { session.disconnect() }.keyboardShortcut(.cancelAction)
+                    Button("Retry Now") { session.reconnect() }.keyboardShortcut(.defaultAction)
+                }
+                .controlSize(.large)
+            }
+            .padding(28)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         case .disconnected(let message):
             VStack(spacing: 12) {
                 Image(systemName: message == nil ? "display" : "exclamationmark.triangle")

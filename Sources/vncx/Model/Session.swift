@@ -11,6 +11,8 @@ final class Session: Identifiable {
     enum Phase: Equatable {
         case connecting
         case connected
+        /// Lost an established connection; retrying automatically. Associated value is the attempt number.
+        case reconnecting(Int, String?)
         case disconnected(String?)
     }
 
@@ -61,6 +63,13 @@ final class Session: Identifiable {
     @ObservationIgnored private var lastPasteboardChange = NSPasteboard.general.changeCount
     @ObservationIgnored private var hasConnectedOnce = false
     @ObservationIgnored private var generation = 0
+    /// Credentials from the last successful login, reused for automatic reconnects (memory only).
+    @ObservationIgnored private var sessionCredentials: Credentials?
+    @ObservationIgnored private var reconnectWork: DispatchWorkItem?
+    @ObservationIgnored private var reconnectAttempt = 0
+    @ObservationIgnored private var watchdog: DispatchWorkItem?
+    private static let retryDelays: [TimeInterval] = [1, 2, 3, 5, 8, 13, 20, 30]
+    private static let maxReconnectAttempts = 30
 
     init(config: SavedConnection) {
         self.config = config
@@ -87,10 +96,12 @@ final class Session: Identifiable {
     // MARK: Lifecycle
 
     func connect() {
+        reconnectWork?.cancel()
+        watchdog?.cancel()
         client?.stop()
         generation += 1
         let gen = generation
-        phase = .connecting
+        if case .reconnecting = phase {} else { phase = .connecting }
         credentialPrompt = nil
 
         let endpoint: NWEndpoint
@@ -101,10 +112,12 @@ final class Session: Identifiable {
         }
         let snapshot = config
         let skipKeychain = lastAuthFailed
+        let remembered = lastAuthFailed ? nil : sessionCredentials
         let options = RFBOptions(endpoint: endpoint, username: config.username, password: nil, quality: config.quality)
 
         let client = RFBClient(options: options, credentialProvider: { [weak self] request in
-            self?.provideCredentials(request, config: snapshot, skipKeychain: skipKeychain, generation: gen)
+            if let remembered, !(request.needsUsername && remembered.username.isEmpty) { return remembered }
+            return self?.provideCredentials(request, config: snapshot, skipKeychain: skipKeychain, generation: gen)
         }, onEvent: { [weak self] event in
             guard let self else { return }
             if case .updated = event {
@@ -125,6 +138,9 @@ final class Session: Identifiable {
 
     func disconnect() {
         generation += 1
+        reconnectWork?.cancel()
+        watchdog?.cancel()
+        reconnectAttempt = 0
         credentialReply?(nil)
         credentialReply = nil
         credentialPrompt = nil
@@ -133,6 +149,42 @@ final class Session: Identifiable {
         saveThumbnail()
         statsTimer?.invalidate()
         if phase != .disconnected(nil) { phase = .disconnected(nil) }
+    }
+
+    /// Schedules the next automatic reconnect attempt, or gives up after too many.
+    private func scheduleReconnect(reason: String?) {
+        reconnectAttempt += 1
+        guard reconnectAttempt <= Self.maxReconnectAttempts else {
+            reconnectAttempt = 0
+            phase = .disconnected(reason ?? "The connection was lost.")
+            return
+        }
+        phase = .reconnecting(reconnectAttempt, reason)
+        let delay = Self.retryDelays[min(reconnectAttempt - 1, Self.retryDelays.count - 1)]
+        let work = DispatchWorkItem { [weak self] in self?.connect() }
+        reconnectWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// After sleep or a network change the TCP connection may be silently dead. Ask for a full frame (which the
+    /// server must answer) and reconnect if nothing arrives in time.
+    func verifyConnection(timeout: TimeInterval = 4) {
+        guard phase == .connected, let client else { return }
+        let before = client.bytesReceived
+        client.requestUpdate(incremental: false)
+        watchdog?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.phase == .connected, let c = self.client, c === client else { return }
+            if c.bytesReceived == before {
+                self.generation += 1 // ignore the dead client's own disconnect event
+                c.stop()
+                self.client = nil
+                self.reconnectAttempt = 0
+                self.scheduleReconnect(reason: "The connection stopped responding.")
+            }
+        }
+        watchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: work)
     }
 
     /// Called on the RFB thread. Uses the Keychain when possible, otherwise asks the user and blocks for the reply.
@@ -167,6 +219,8 @@ final class Session: Identifiable {
         switch event {
         case .connected(let name, let fb, let sec):
             phase = .connected
+            reconnectAttempt = 0
+            if let used = client?.usedCredentials { sessionCredentials = used }
             desktopName = name
             securityType = sec
             lastAuthFailed = false
@@ -197,11 +251,25 @@ final class Session: Identifiable {
             desktopName = name
         case .disconnected(let error):
             statsTimer?.invalidate()
-            if phase == .connected { saveThumbnail() }
-            if case .authFailed = error as? RFBError { lastAuthFailed = true }
+            watchdog?.cancel()
+            let wasConnected = phase == .connected
+            if wasConnected { saveThumbnail() }
             client = nil
             credentialPrompt = nil
-            phase = .disconnected(error?.localizedDescription ?? (hasConnectedOnce ? "The connection was closed." : nil))
+            let message = error?.localizedDescription ?? (hasConnectedOnce ? "The connection was closed." : nil)
+            if case .authFailed = error as? RFBError {
+                lastAuthFailed = true
+                sessionCredentials = nil
+                reconnectAttempt = 0
+                phase = .disconnected(message)
+            } else if case .cancelled = error as? RFBError {
+                phase = .disconnected(nil)
+            } else if wasConnected || isReconnecting {
+                // Lost a working connection (or still trying to get it back): keep retrying.
+                scheduleReconnect(reason: message)
+            } else {
+                phase = .disconnected(message)
+            }
         }
     }
 
@@ -240,8 +308,11 @@ final class Session: Identifiable {
     }
 
     func reconnect() {
+        reconnectAttempt = 0
         connect()
     }
+
+    var isReconnecting: Bool { if case .reconnecting = phase { return true } else { return false } }
 
     // MARK: Remote control helpers
 
