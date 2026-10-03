@@ -397,8 +397,9 @@ struct StatsOverlay: View {
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 3) {
             row("Screen", "\(Int(size.width))×\(Int(size.height))")
-            row("Frames", "\(stats.fps)/s" + (stats.continuous ? " · pushed" : " · polled"))
+            row("Frames", "\(stats.fps)/s" + (stats.continuous ? " · pushed" : stats.limit != nil ? " · paced" : " · polled"))
             row("Received", rate(stats.bitsPerSecond))
+            row("Limit", stats.limit.map(rate) ?? "none")
             row("Link", stats.linkBitsPerSecond.map(rate) ?? "measuring…")
             row("Latency", stats.rttMs.map { String(format: "%.1f ms", $0) } ?? "n/a")
             row("Encoding", stats.encodings.isEmpty ? "–" : stats.encodings.map { "\($0.name) \(Int(($0.share * 100).rounded()))%" }.joined(separator: ", "))

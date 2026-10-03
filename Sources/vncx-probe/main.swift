@@ -5,7 +5,7 @@
 // Exercises auth and decoders against real servers without the UI.
 //
 //   vncx-probe host[:port] [--password PW] [--user NAME] [--encoding raw|copyrect|rre|hextile|zlib|tight|zrle|tightjpeg]
-//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--watch]
+//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--limit MBIT] [--watch]
 import Foundation
 import Network
 import CoreGraphics
@@ -22,6 +22,7 @@ let password = option("--password") ?? ProcessInfo.processInfo.environment["VNC_
 let user = option("--user") ?? ""
 let encodingName = option("--encoding")
 let quality = Quality(rawValue: option("--quality") ?? "") ?? .lossless
+let limit = option("--limit").flatMap(Double.init).map { $0 * 1e6 }
 let frames = Int(option("--frames") ?? "3") ?? 3
 let seconds = Double(option("--seconds") ?? "20") ?? 20
 let out = option("--out")
@@ -135,6 +136,7 @@ if ProcessInfo.processInfo.environment["TRACE"] != nil {
 client.traceScreens = { reason, status, list in
     print("  layout reason=\(reason) status=\(status): \(list.map(\.description).joined(separator: ", "))")
 }
+client.setBandwidthLimit(limit)
 client.start()
 let ping = DispatchSource.makeTimerSource(queue: .global())
 if watch {
@@ -142,9 +144,9 @@ if watch {
     ping.setEventHandler {
         client.measureLatency()
         let st = client.statsSnapshot()
-        print(String(format: "%7.2fs ping: rtt=%@ continuous=%@ silent %.1fs", Date().timeIntervalSince(start),
+        print(String(format: "%7.2fs ping: rtt=%@ continuous=%@ limit=%@ silent %.1fs received %.1f MB", Date().timeIntervalSince(start),
                      st.rtt.map { String(format: "%.1f ms", $0 * 1000) } ?? "-", st.continuousUpdates ? "yes" : "no",
-                     Date().timeIntervalSince(lastUpdate)))
+                     st.limit.map { String(format: "%.0f", $0 / 1e6) } ?? "-", Date().timeIntervalSince(lastUpdate), Double(st.bytes) / 1e6))
     }
     ping.resume()
 }

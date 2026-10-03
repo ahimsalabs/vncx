@@ -337,6 +337,7 @@ final class Session: Identifiable {
             DispatchQueue.main.async { if self.generation == gen { self.handle(event) } }
         })
         self.client = client
+        client.setBandwidthLimit(config.bandwidth.bitsPerSecond)
         client.start()
     }
 
@@ -636,9 +637,10 @@ final class Session: Identifiable {
         var encodings: [(name: String, share: Double)] = []
         var level: Quality = .lossless
         var continuous = false
+        var limit: Double?
         static func == (a: LiveStats, b: LiveStats) -> Bool {
             a.fps == b.fps && a.bitsPerSecond == b.bitsPerSecond && a.linkBitsPerSecond == b.linkBitsPerSecond
-                && a.rttMs == b.rttMs && a.level == b.level && a.continuous == b.continuous
+                && a.rttMs == b.rttMs && a.level == b.level && a.continuous == b.continuous && a.limit == b.limit
                 && a.encodings.map(\.name) == b.encodings.map(\.name) && a.encodings.map(\.share) == b.encodings.map(\.share)
         }
     }
@@ -648,12 +650,18 @@ final class Session: Identifiable {
     @ObservationIgnored private var lastSnapshot: RFBStats?
     @ObservationIgnored private var statsTick = 0
     @ObservationIgnored private var pendingLevel: (level: Quality, count: Int)?
+    @ObservationIgnored private var rttSamples: [Double] = []
+    @ObservationIgnored private var throughputSamples: [Double] = []
+    @ObservationIgnored private var autoLimit: Double?
 
     private func startStats() {
         statsTimer?.invalidate()
         lastSnapshot = nil
         statsTick = 0
         pendingLevel = nil
+        rttSamples = []
+        throughputSamples = []
+        autoLimit = nil
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.statsTimerFired()
         }
@@ -674,6 +682,7 @@ final class Session: Identifiable {
         live.rttMs = now.rtt.map { $0 * 1000 }
         live.level = now.level
         live.continuous = now.continuousUpdates
+        live.limit = now.limit
         let deltas = now.rectBytes.map { (Encoding.name($0.key), Double($0.value &- (prev.rectBytes[$0.key] ?? 0))) }
             .filter { $0.1 > 0 && !$0.0.hasPrefix("-") }
         let total = deltas.reduce(0) { $0 + $1.1 }
@@ -693,6 +702,32 @@ final class Session: Identifiable {
         if text != throughput { throughput = text }
 
         if config.quality == .auto { adjustQuality(now) }
+        throughputSamples.append(live.bitsPerSecond)
+        if throughputSamples.count > 5 { throughputSamples.removeFirst() }
+        // Latency is measured on odd ticks; judge it on the following one.
+        if config.bandwidth == .automatic && statsTick % 2 == 0 { adjustBandwidth(now) }
+    }
+
+    /// Automatic bandwidth limit, a delay-based controller. The latency fence queues behind frame data, so a round
+    /// trip well above the connection's baseline means the server is sending faster than the path drains: back off
+    /// multiplicatively. While latency stays near the baseline and the limit is what holds throughput back, raise
+    /// it gradually, up to the measured link rate. The limit stays for the session: paced updates keep at most one
+    /// frame in flight, so they can't build the queues that continuous updates did.
+    private func adjustBandwidth(_ st: RFBStats) {
+        guard let rtt = st.rtt else { return } // servers without fences
+        rttSamples.append(rtt)
+        if rttSamples.count > 30 { rttSamples.removeFirst() } // about a minute
+        let queueing = rtt - (rttSamples.min() ?? rtt)
+        let recent = throughputSamples.max() ?? 0
+        var limit = autoLimit
+        if queueing > 0.04 {
+            limit = max(2e6, min(autoLimit ?? .infinity, max(recent, 2e6)) * 0.7)
+        } else if let l = autoLimit, queueing < 0.015, recent > l * 0.7 {
+            limit = min(l * 1.15, max(l, st.linkRate.map { $0 * 8 } ?? .infinity))
+        }
+        guard limit != autoLimit else { return }
+        autoLimit = limit
+        client?.setBandwidthLimit(limit)
     }
 
     /// Automatic quality: lossless on fast links, JPEG as the link slows. Downgrades after 3 s of evidence,

@@ -21,6 +21,32 @@ enum PasteShortcut: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// A cap on how fast the server sends. Automatic backs off when latency shows the path is queueing.
+enum BandwidthLimit: String, Codable, CaseIterable, Identifiable {
+    case automatic, unlimited, mbit50, mbit20, mbit10, mbit5
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .unlimited: return "Unlimited"
+        case .mbit50: return "50 Mbit/s"
+        case .mbit20: return "20 Mbit/s"
+        case .mbit10: return "10 Mbit/s"
+        case .mbit5: return "5 Mbit/s"
+        }
+    }
+    /// The fixed limit in bits/s; nil for automatic and unlimited.
+    var bitsPerSecond: Double? {
+        switch self {
+        case .automatic, .unlimited: return nil
+        case .mbit50: return 50e6
+        case .mbit20: return 20e6
+        case .mbit10: return 10e6
+        case .mbit5: return 5e6
+        }
+    }
+}
+
 enum LocalCursorMode: String, Codable, CaseIterable, Identifiable {
     case arrow, dot, hidden
     var id: String { rawValue }
@@ -42,6 +68,7 @@ struct SavedConnection: Codable, Identifiable, Hashable {
     /// Set for computers discovered via Bonjour; the service name is resolved at connect time.
     var bonjourName: String?
     var quality: Quality = Preferences.shared.defaultQuality
+    var bandwidth: BandwidthLimit = .automatic
     var scaling: ScalingMode = Preferences.shared.defaultScaling
     var viewOnly = false
     var remoteResizeRetina = false
@@ -64,7 +91,7 @@ struct SavedConnection: Codable, Identifiable, Hashable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, host, port, username, bonjourName, quality, scaling, viewOnly, remoteResizeRetina
+        case id, name, host, port, username, bonjourName, quality, bandwidth, scaling, viewOnly, remoteResizeRetina
         case lastConnected, lastResolution, localCursor, ssh, wake, preferredDisplay, pasteShortcut
     }
 
@@ -80,6 +107,7 @@ struct SavedConnection: Codable, Identifiable, Hashable {
         username = get(.username, username)
         bonjourName = get(.bonjourName, bonjourName)
         quality = get(.quality, quality)
+        bandwidth = get(.bandwidth, bandwidth)
         scaling = get(.scaling, scaling)
         viewOnly = get(.viewOnly, viewOnly)
         remoteResizeRetina = get(.remoteResizeRetina, remoteResizeRetina)

@@ -291,6 +291,9 @@ struct ConnectionEditor: View {
                     Picker("Picture quality", selection: $connection.quality) {
                         ForEach(Quality.allCases) { Text($0.label).tag($0) }
                     }
+                    Picker("Bandwidth limit", selection: $connection.bandwidth) {
+                        ForEach(BandwidthLimit.allCases) { Text($0.label).tag($0) }
+                    }
                     Toggle("View only", isOn: $connection.viewOnly)
                     Picker("Paste dropped text with", selection: $connection.pasteShortcut) {
                         ForEach(PasteShortcut.allCases) { Text($0.label).tag($0) }

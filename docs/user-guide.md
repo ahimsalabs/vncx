@@ -197,13 +197,22 @@ Hold ⌥ while dropping to type the text key by key instead. Typing only covers 
 
 JPEG only applies to servers that support Tight encoding. macOS Screen Sharing doesn't, so it's always lossless there.
 
+**Bandwidth limit** (per computer) caps how fast the server sends. Servers that support continuous updates otherwise send every change as soon as it happens, so a video on the remote can fill your link even at Low bandwidth. Under a limit, vncx asks for each update itself and, after an update of a given size, waits until that size divided by the limit has passed before asking for the next one, but never more than 1.5 seconds. Small updates such as typing and pointer movement go out at once; video and scrolling drop to the frame rate that fits.
+
+| Setting | Behavior |
+|---|---|
+| **Automatic** (default) | No limit until latency shows the connection queueing (more than 40 ms over its baseline), then about 70% of the recent throughput. It rises again by 15% steps while latency stays low and the limit is what holds throughput back, up to the measured link speed. Needs a server with fences (WayVNC, TigerVNC, ReFrame). |
+| **Unlimited** | Continuous updates whenever the server supports them. |
+| **50, 20, 10 or 5 Mbit/s** | A fixed limit. |
+
 **Connection stats** (⌃⌘I, or the gauge button) shows an overlay in the corner:
 
 | Row | Meaning |
 |---|---|
 | Screen | The remote resolution. |
-| Frames | Updates per second, and whether the server **pushes** updates (continuous updates) or vncx **polls** for them. |
+| Frames | Updates per second, and whether the server **pushes** updates (continuous updates), vncx **polls** for them, or vncx polls **paced** by a bandwidth limit. |
 | Received | Current bandwidth. |
+| Limit | The bandwidth limit in force, or none. |
 | Link | Estimated link speed, measured while large updates stream in. |
 | Latency | Round-trip time measured with protocol fences, on servers that support them. |
 | Encoding | Share of data by encoding over the last second. |
@@ -284,6 +293,7 @@ Edit… on a computer, or **+** in the launcher.
 | Display | Scaling | Scale to Fit, Fill Width, Fill Height, Actual Size or Resize Remote. |
 | | Use Retina resolution when resizing remote | Resize Remote asks for pixels instead of points. |
 | | Picture quality | Automatic, Best, Balanced or Low bandwidth. |
+| | Bandwidth limit | Automatic, Unlimited, or 50, 20, 10 or 5 Mbit/s. |
 | | View only | Start sessions in view-only mode. |
 | | Paste dropped text with | Automatic, Ctrl+V, Command+V, Ctrl+Shift+V or Shift+Insert. |
 | | Local cursor | Arrow, Dot or Hidden, for servers without cursor shapes. |

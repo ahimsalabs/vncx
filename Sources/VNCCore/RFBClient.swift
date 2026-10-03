@@ -81,6 +81,8 @@ package struct RFBStats: Sendable {
     package var continuousUpdates = false
     package var fenceSupported = false
     package var level: Quality = .lossless
+    /// The bandwidth limit in force (bits/s), nil when unlimited.
+    package var limit: Double?
 }
 
 package struct Credentials: Sendable {
@@ -155,15 +157,31 @@ package final class RFBClient: @unchecked Sendable {
     private var level: Quality = .lossless
     private var cuSupported = false
     private var cuEnabled = false
+    /// We asked the server to stop continuous updates and are waiting for its EndOfContinuousUpdates.
+    private var cuStopping = false
     private var fenceSupported = false
+    private var limit: Double?
+    private var lastRequestAt: UInt64 = 0
+    /// When the oldest unanswered latency fence was sent.
+    private var fencePendingSince: UInt64?
+    /// A latency fence to send just before the next update request (see `measureLatency`).
+    private var fenceBeforeRequest = false
+    private let pacer = DispatchQueue(label: "vncx.pacer", qos: .userInteractive)
 
     package func statsSnapshot() -> RFBStats {
         lock.withLock {
             var s = stats
             s.bytes = transport.bytesReceived &- UInt64(transport.buffered)
-            s.continuousUpdates = cuEnabled
+            s.continuousUpdates = cuEnabled && !cuStopping
             s.fenceSupported = fenceSupported
             s.level = level
+            s.limit = limit
+            // An unanswered fence is at least as slow as its age, so a stalled stream shows rising latency. Only
+            // with continuous updates: when polling, an idle server may hold the reply until it has an update.
+            if cuEnabled && !cuStopping, let sent = fencePendingSince {
+                let age = Double(DispatchTime.now().uptimeNanoseconds &- sent) / 1e9
+                if age > s.rtt ?? 0 { s.rtt = age }
+            }
             return s
         }
     }
@@ -176,11 +194,58 @@ package final class RFBClient: @unchecked Sendable {
     }
 
     /// Sends a fence carrying a timestamp; the reply gives the round-trip time.
+    /// When polling, the fence waits for the next update request instead: some servers (WayVNC) hold a fence reply
+    /// behind an outstanding request until the screen changes, which would read as seconds of latency.
     package func measureLatency() {
-        guard lock.withLock({ fenceSupported }) else { return }
+        let now = lock.withLock { () -> Bool in
+            guard fenceSupported else { return false }
+            if cuEnabled && !cuStopping { return true }
+            fenceBeforeRequest = true
+            return false
+        }
+        if now { sendLatencyFence() }
+    }
+
+    private func sendLatencyFence() {
         let now = DispatchTime.now().uptimeNanoseconds
+        lock.withLock { if fencePendingSince == nil { fencePendingSince = now } }
         let payload = (0..<8).map { UInt8(truncatingIfNeeded: now >> (56 - 8 * UInt64($0))) }
         sendFence(flags: Fence.request | Fence.blockBefore, payload: payload)
+    }
+
+    /// The longest a paced request waits, so one big update (a full refresh) costs a slow frame, not a freeze.
+    private static let maxPacingWait = 1.5
+
+    /// Caps the server's sending rate (bits/s; nil for no limit). With a limit, continuous updates are turned off and
+    /// update requests are paced instead: after an update of B bytes, the next request waits until B / limit has
+    /// passed since the previous one. Small updates (typing, pointer) go out at once; big ones (video) slow down.
+    package func setBandwidthLimit(_ bitsPerSecond: Double?) {
+        enum Change { case none, stop, start }
+        let change = lock.withLock { () -> Change in
+            limit = bitsPerSecond
+            if bitsPerSecond != nil && cuEnabled && !cuStopping { cuStopping = true; return .stop }
+            if bitsPerSecond == nil && cuSupported && !cuEnabled { cuEnabled = true; return .start }
+            return .none
+        }
+        switch change {
+        case .stop: sendContinuousUpdates(enable: false)
+        case .start: sendContinuousUpdates(enable: true)
+        case .none: break
+        }
+    }
+
+    /// Requests the next incremental update after one of `bytes` arrived, waiting first if a limit applies.
+    private func requestNext(after bytes: UInt64) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        let due = lock.withLock { () -> UInt64? in
+            guard let limit else { return nil }
+            return lastRequestAt &+ UInt64(min(Double(bytes) * 8 / limit, Self.maxPacingWait) * 1e9)
+        }
+        guard let due, due > now else { return requestUpdate(incremental: true) }
+        pacer.asyncAfter(deadline: DispatchTime(uptimeNanoseconds: due)) { [weak self] in
+            guard let self, !self.transport.isCancelled else { return }
+            self.requestUpdate(incremental: true)
+        }
     }
 
     private enum Fence {
@@ -194,9 +259,9 @@ package final class RFBClient: @unchecked Sendable {
         transport.send([248, 0, 0, 0] + be32(flags) + [UInt8(payload.count)] + payload)
     }
 
-    private func enableContinuousUpdates() {
+    private func sendContinuousUpdates(enable: Bool) {
         guard let fb = framebuffer else { return }
-        transport.send([150, 1] + be16(0) + be16(0) + be16(fb.width) + be16(fb.height))
+        transport.send([150, enable ? 1 : 0] + be16(0) + be16(0) + be16(fb.width) + be16(fb.height))
     }
 
     // Extended clipboard state (guarded by `lock`).
@@ -373,14 +438,28 @@ package final class RFBClient: @unchecked Sendable {
                 let n = Int(try transport.u16())
                 try transport.skip(n * 6)
             case 2: onEvent(.bell)
-            case 150: // EndOfContinuousUpdates: first one means "supported"; later ones mean the server stopped.
-                let enable = lock.withLock { () -> Bool in
-                    defer { cuSupported = true }
-                    if !cuSupported { cuEnabled = true; return true }
+            case 150: // EndOfContinuousUpdates: the first means "supported"; later ones mean updates stopped.
+                enum Next { case enable, poll, none }
+                let next = lock.withLock { () -> Next in
+                    if !cuSupported {
+                        cuSupported = true
+                        // With a bandwidth limit, keep polling (the initial request is still outstanding).
+                        if limit != nil { return .none }
+                        cuEnabled = true
+                        return .enable
+                    }
+                    let stopping = cuStopping
+                    cuStopping = false
                     cuEnabled = false
-                    return false
+                    // The limit may have been lifted while we waited for the server to stop.
+                    if stopping && limit == nil { cuEnabled = true; return .enable }
+                    return .poll
                 }
-                if enable { enableContinuousUpdates() } else { requestUpdate(incremental: true) }
+                switch next {
+                case .enable: sendContinuousUpdates(enable: true)
+                case .poll: requestUpdate(incremental: true)
+                case .none: break
+                }
             case 248: // ServerFence
                 try transport.skip(3)
                 let flags = try transport.u32()
@@ -392,7 +471,10 @@ package final class RFBClient: @unchecked Sendable {
                 } else if payload.count == 8 {
                     let sent = payload.reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
                     let now = DispatchTime.now().uptimeNanoseconds
-                    if now > sent { lock.withLock { stats.rtt = Double(now - sent) / 1e9 } }
+                    lock.withLock {
+                        if now > sent { stats.rtt = Double(now - sent) / 1e9 }
+                        fencePendingSince = nil
+                    }
                 }
             case 3:
                 try transport.skip(3)
@@ -470,7 +552,7 @@ package final class RFBClient: @unchecked Sendable {
             }
             return cuEnabled
         }
-        if !continuous { requestUpdate(incremental: true) }
+        if !continuous { requestNext(after: total) }
         onEvent(.updated)
     }
 
@@ -479,7 +561,7 @@ package final class RFBClient: @unchecked Sendable {
         let fb = Framebuffer(width: w, height: h)
         fb.copyContents(of: old)
         framebuffer = fb
-        if lock.withLock({ cuEnabled }) { enableContinuousUpdates() }
+        if lock.withLock({ cuEnabled && !cuStopping }) { sendContinuousUpdates(enable: true) }
         onEvent(.resized(fb))
     }
 
@@ -625,6 +707,12 @@ package final class RFBClient: @unchecked Sendable {
 
     package func requestUpdate(incremental: Bool) {
         guard let fb = framebuffer else { return }
+        let fence = lock.withLock { () -> Bool in
+            lastRequestAt = DispatchTime.now().uptimeNanoseconds
+            defer { fenceBeforeRequest = false }
+            return fenceBeforeRequest
+        }
+        if fence { sendLatencyFence() }
         transport.send([3, incremental ? 1 : 0] + be16(0) + be16(0) + be16(fb.width) + be16(fb.height))
     }
 
