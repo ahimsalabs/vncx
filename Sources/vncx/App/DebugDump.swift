@@ -61,7 +61,12 @@ enum DebugDump {
     @MainActor static func runAction(_ dir: URL) {
         guard let action = try? String(contentsOf: dir.appendingPathComponent("action"), encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines),
-              let session = SessionManager.shared.activeSession ?? SessionManager.shared.anySession else { return }
+              let session = SessionManager.shared.activeSession ?? SessionManager.shared.anySession else {
+            if (try? String(contentsOf: dir.appendingPathComponent("action"), encoding: .utf8))?.hasPrefix("about") == true {
+                BuildInfo.showAboutPanel()
+            }
+            return
+        }
         if action.hasPrefix("select:"), let n = Int(action.dropFirst(7)) {
             session.selectedDisplay = session.displays.first { $0.number == n }?.id
         } else if action == "openall" {

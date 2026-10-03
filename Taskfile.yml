@@ -29,6 +29,15 @@ tasks:
       - mkdir -p {{.BUNDLE}}/Contents/MacOS {{.BUNDLE}}/Contents/Resources
       - cp "$(swift build -c release --show-bin-path)/{{.APP}}" {{.BUNDLE}}/Contents/MacOS/{{.APP}}
       - cp Resources/Info.plist {{.BUNDLE}}/Contents/Info.plist
+      # Stamp the build: commit (with -dirty for uncommitted changes), build date, and an increasing build number.
+      - |
+        COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+        if [ -n "$(git status --porcelain 2>/dev/null)" ]; then COMMIT="$COMMIT-dirty"; fi
+        /usr/libexec/PlistBuddy \
+          -c "Set :CFBundleVersion $(git rev-list --count HEAD 2>/dev/null || echo 1)" \
+          -c "Add :VNCXGitCommit string $COMMIT" \
+          -c "Add :VNCXBuildDate string $(date -u +%Y-%m-%dT%H:%MZ)" \
+          {{.BUNDLE}}/Contents/Info.plist
       - cp {{.BUILD_DIR}}/AppIcon.icns {{.BUNDLE}}/Contents/Resources/AppIcon.icns
       - cp LICENSE NOTICE {{.BUNDLE}}/Contents/Resources/
       - codesign --force --sign "{{.SIGN_IDENTITY}}" --entitlements Resources/vncx.entitlements {{.BUNDLE}}

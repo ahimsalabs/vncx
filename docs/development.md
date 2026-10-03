@@ -20,6 +20,18 @@ The app bundle is put together by hand from the SwiftPM binary, `Resources/Info.
 task bundle SIGN_IDENTITY="<SHA-1 or name of a code-signing identity>"
 ```
 
+## Build identity
+
+`task bundle` stamps the bundle's `Info.plist` with three values:
+
+| Key | Value |
+|---|---|
+| `CFBundleVersion` | The build number: the commit count of `HEAD`, so it always increases on `main`. |
+| `VNCXGitCommit` | The full commit hash, with `-dirty` when the working copy has uncommitted changes. In a jj repo, git's `HEAD` is the working copy's parent. |
+| `VNCXBuildDate` | The UTC build time. |
+
+**About vncx** shows the version and build, the commit linked to GitHub, and the build date. **vncx › Copy Version Info** copies a one-line summary for bug reports, for example `vncx 0.1.0 (21) e98a754, built 2026-10-03T18:47Z`. CI checks out the full history so the build number matches local builds.
+
 ## Release builds
 
 The `build` workflow (`.github/workflows/build.yml`) runs on demand from the Actions tab or with `gh workflow run build -R ahimsalabs/vncx`. It builds on a GitHub macOS runner, signs with a self-signed certificate, uploads the zip as a run artifact, and by default replaces the [`nightly`](https://github.com/ahimsalabs/vncx/releases/tag/nightly) prerelease.

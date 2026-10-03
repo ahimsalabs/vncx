@@ -77,6 +77,13 @@ struct AppCommands: Commands {
 
     var body: some Commands {
         let _ = { AppState.shared.openLauncher = { [openWindow] in openWindow(id: "launcher") } }()
+        CommandGroup(replacing: .appInfo) {
+            Button("About vncx") { BuildInfo.showAboutPanel() }
+            Button("Copy Version Info") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(BuildInfo.summary, forType: .string)
+            }
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Connection…") {
                 openWindow(id: "launcher")
