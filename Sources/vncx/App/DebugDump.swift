@@ -35,6 +35,9 @@ enum DebugDump {
                 let l = remote.currentLayout()
                 report += "  remote: fb=\(remote.framebuffer.map { "\($0.width)x\($0.height)" } ?? "nil") bounds=\(remote.bounds.size) drawable=\(remote.drawableSize) scaling=\(remote.scaling) layout.dst=\(l.dst) scale=\(l.scale) src=\(l.srcOrigin)\n"
                 if let s = remote.session {
+                    let r = ImageRenderer(content: StatsOverlay(stats: s.liveStats, size: s.framebufferSize, auto: s.config.quality == .auto).padding(8).background(Color.gray))
+                    r.scale = 2
+                    if let img = r.cgImage { write(img, dir.appendingPathComponent("stats-\(i).png")) }
                     report += "  session: phase=\(s.phase) title=\"\(s.title)\" subtitle=\"\(s.subtitle)\" prompt=\(s.credentialPrompt != nil)\n"
                 }
                 if let img = remote.renderOffscreen() { write(img, dir.appendingPathComponent("render-\(i).png")) }

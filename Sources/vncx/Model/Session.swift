@@ -376,7 +376,12 @@ final class Session: Identifiable {
         persistConfig(force: true)
     }
 
+    /// Development runs (VNCX_DEBUG_DIR / VNCX_OPEN_JSON) never touch the user's saved connections.
+    static let isEphemeral = ProcessInfo.processInfo.environment["VNCX_DEBUG_DIR"] != nil
+        || ProcessInfo.processInfo.environment["VNCX_OPEN_JSON"] != nil
+
     private func persistConfig(force: Bool = false) {
+        guard !Self.isEphemeral else { return }
         let store = ConnectionStore.shared
         if force || store.connection(config.id) != nil { store.upsert(config) }
     }
@@ -455,22 +460,95 @@ final class Session: Identifiable {
 
     func refresh() { client?.requestUpdate(incremental: false) }
 
+    /// What the stats overlay shows, refreshed once a second.
+    struct LiveStats: Equatable {
+        var fps = 0
+        var bitsPerSecond: Double = 0
+        var linkBitsPerSecond: Double?
+        var rttMs: Double?
+        var encodings: [(name: String, share: Double)] = []
+        var level: Quality = .lossless
+        var continuous = false
+        static func == (a: LiveStats, b: LiveStats) -> Bool {
+            a.fps == b.fps && a.bitsPerSecond == b.bitsPerSecond && a.linkBitsPerSecond == b.linkBitsPerSecond
+                && a.rttMs == b.rttMs && a.level == b.level && a.continuous == b.continuous
+                && a.encodings.map(\.name) == b.encodings.map(\.name) && a.encodings.map(\.share) == b.encodings.map(\.share)
+        }
+    }
+
+    private(set) var liveStats = LiveStats()
+    var showStats = false
+    @ObservationIgnored private var lastSnapshot: RFBStats?
+    @ObservationIgnored private var statsTick = 0
+    @ObservationIgnored private var pendingLevel: (level: Quality, count: Int)?
+
     private func startStats() {
         statsTimer?.invalidate()
-        lastBytes = client?.bytesReceived ?? 0
+        lastSnapshot = nil
+        statsTick = 0
+        pendingLevel = nil
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self, let client = self.client else { return }
-            let now = client.bytesReceived
-            let bits = Double(now &- self.lastBytes) * 8
-            self.lastBytes = now
-            let text: String
-            switch bits {
-            case ..<1: text = ""
-            case ..<1_000_000: text = String(format: "%.0f kbit/s", bits / 1000)
-            default: text = String(format: "%.1f Mbit/s", bits / 1_000_000)
-            }
-            if text != self.throughput { self.throughput = text }
+            self?.statsTimerFired()
         }
+    }
+
+    private func statsTimerFired() {
+        guard let client else { return }
+        statsTick += 1
+        if statsTick % 2 == 1 { client.measureLatency() }
+        let now = client.statsSnapshot()
+        defer { lastSnapshot = now }
+        guard let prev = lastSnapshot else { return }
+
+        var live = LiveStats()
+        live.fps = now.updates - prev.updates
+        live.bitsPerSecond = Double(now.bytes &- prev.bytes) * 8
+        live.linkBitsPerSecond = now.linkRate.map { $0 * 8 }
+        live.rttMs = now.rtt.map { $0 * 1000 }
+        live.level = now.level
+        live.continuous = now.continuousUpdates
+        let deltas = now.rectBytes.map { (Encoding.name($0.key), Double($0.value &- (prev.rectBytes[$0.key] ?? 0))) }
+            .filter { $0.1 > 0 && !$0.0.hasPrefix("-") }
+        let total = deltas.reduce(0) { $0 + $1.1 }
+        if total > 0 {
+            live.encodings = deltas.sorted { $0.1 > $1.1 }.prefix(3).map { ($0.0, $0.1 / total) }
+        } else {
+            live.encodings = liveStats.encodings // keep showing the last mix while idle
+        }
+        if live != liveStats { liveStats = live }
+
+        let text: String
+        switch live.bitsPerSecond {
+        case ..<1: text = ""
+        case ..<1_000_000: text = String(format: "%.0f kbit/s", live.bitsPerSecond / 1000)
+        default: text = String(format: "%.1f Mbit/s", live.bitsPerSecond / 1_000_000)
+        }
+        if text != throughput { throughput = text }
+
+        if config.quality == .auto { adjustQuality(now) }
+    }
+
+    /// Automatic quality: lossless on fast links, JPEG as the link slows. Downgrades after 3 s of evidence,
+    /// upgrades after 6 s, so it doesn't flap.
+    private func adjustQuality(_ st: RFBStats) {
+        guard let link = st.linkRate.map({ $0 * 8 / 1e6 }) else { return } // Mbit/s; unknown until a big update
+        let rtt = (st.rtt ?? 0) * 1000
+        let target: Quality
+        if link >= 40 && rtt < 60 { target = .lossless }
+        else if link >= 8 && rtt < 200 { target = .balanced }
+        else { target = .low }
+        guard target != st.level else { pendingLevel = nil; return }
+        let count = (pendingLevel?.level == target ? pendingLevel!.count : 0) + 1
+        pendingLevel = (target, count)
+        let upgrading = rank(target) > rank(st.level)
+        if count >= (upgrading ? 6 : 3) {
+            client?.setQualityLevel(target)
+            pendingLevel = nil
+        }
+    }
+
+    private func rank(_ q: Quality) -> Int {
+        switch q { case .low: return 0; case .balanced: return 1; case .lossless, .auto: return 2 }
     }
 
     // MARK: Images
@@ -495,7 +573,7 @@ final class Session: Identifiable {
     }
 
     private func saveThumbnail() {
-        guard hasConnectedOnce, ConnectionStore.shared.connection(config.id) != nil,
+        guard !Self.isEphemeral, hasConnectedOnce, ConnectionStore.shared.connection(config.id) != nil,
               let image = snapshot(maxWidth: 640) else { return }
         let url = ConnectionStore.shared.thumbnailURL(config.id)
         if write(image, to: url) { ConnectionStore.shared.thumbnailGeneration += 1 }

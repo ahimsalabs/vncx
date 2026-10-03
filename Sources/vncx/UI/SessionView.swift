@@ -33,6 +33,12 @@ struct SessionView: View {
             RemoteViewRepresentable(session: session)
                 .opacity(session.phase == .connected ? 1 : 0.35)
             overlay
+            if session.showStats && session.phase == .connected {
+                StatsOverlay(stats: session.liveStats, size: session.framebufferSize, auto: session.config.quality == .auto)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(12)
+                    .allowsHitTesting(false)
+            }
         }
         .background(Color.black)
         .ignoresSafeArea(.container, edges: .bottom)
@@ -128,6 +134,12 @@ struct SessionView: View {
             .disabled(session.phase != .connected)
         }
         ToolbarItem(placement: .primaryAction) {
+            Toggle(isOn: $session.showStats) {
+                Label("Connection Stats", systemImage: "gauge.with.dots.needle.33percent")
+            }
+            .help("Show frame rate, bandwidth, latency and encoding (⌃⌘I)")
+        }
+        ToolbarItem(placement: .primaryAction) {
             Menu {
                 Button("Save Screenshot to Desktop") { session.saveScreenshot() }
                 Button("Copy Screenshot") { session.copyScreenshot() }
@@ -216,5 +228,38 @@ struct CredentialsSheet: View {
         .padding(20)
         .frame(width: 440)
         .onAppear { focus = prompt.request.needsUsername && username.isEmpty ? .user : .password }
+    }
+}
+
+struct StatsOverlay: View {
+    let stats: Session.LiveStats
+    let size: CGSize
+    let auto: Bool
+
+    private func rate(_ bps: Double) -> String {
+        bps >= 1_000_000 ? String(format: "%.1f Mbit/s", bps / 1_000_000) : String(format: "%.0f kbit/s", bps / 1000)
+    }
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 3) {
+            row("Screen", "\(Int(size.width))×\(Int(size.height))")
+            row("Frames", "\(stats.fps)/s" + (stats.continuous ? " · pushed" : " · polled"))
+            row("Received", rate(stats.bitsPerSecond))
+            row("Link", stats.linkBitsPerSecond.map(rate) ?? "measuring…")
+            row("Latency", stats.rttMs.map { String(format: "%.1f ms", $0) } ?? "n/a")
+            row("Encoding", stats.encodings.isEmpty ? "–" : stats.encodings.map { "\($0.name) \(Int(($0.share * 100).rounded()))%" }.joined(separator: ", "))
+            row("Quality", (auto ? "Auto · " : "") + stats.level.label)
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .environment(\.colorScheme, .dark)
+    }
+
+    private func row(_ k: String, _ v: String) -> some View {
+        GridRow {
+            Text(k).foregroundStyle(.secondary)
+            Text(v)
+        }
     }
 }

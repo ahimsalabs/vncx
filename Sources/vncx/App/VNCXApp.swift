@@ -110,6 +110,9 @@ struct AppCommands: Commands {
             Button("Send Clipboard to Remote") { s?.syncClipboardToRemote(force: true) }
                 .disabled(!connected)
             Divider()
+            Toggle("Show Connection Stats", isOn: Binding(get: { s?.showStats ?? false }, set: { s?.showStats = $0 }))
+                .keyboardShortcut("i", modifiers: [.control, .command])
+                .disabled(s == nil)
             Button("Save Screenshot to Desktop") { s?.saveScreenshot() }
                 .keyboardShortcut("s", modifiers: [.control, .command])
                 .disabled(!connected)

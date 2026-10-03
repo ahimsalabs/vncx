@@ -36,7 +36,7 @@ final class Preferences {
         keyboardCapture = KeyboardCapturePolicy(rawValue: defaults.string(forKey: "keyboardCapture") ?? "") ?? .fullScreen
         syncClipboard = defaults.object(forKey: "syncClipboard") as? Bool ?? true
         smoothScaling = defaults.object(forKey: "smoothScaling") as? Bool ?? true
-        defaultQuality = Quality(rawValue: defaults.string(forKey: "defaultQuality") ?? "") ?? .lossless
+        defaultQuality = Quality(rawValue: defaults.string(forKey: "defaultQuality") ?? "") ?? .auto
         defaultScaling = ScalingMode(rawValue: defaults.string(forKey: "defaultScaling") ?? "") ?? .fit
     }
 }

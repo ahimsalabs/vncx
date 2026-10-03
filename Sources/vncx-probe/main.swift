@@ -76,6 +76,7 @@ client = RFBClient(options: options, credentialProvider: { req in
             print("requesting desktop size \(w)x\(h) (supported=\(client.supportsRemoteResize))")
             client.requestDesktopSize(width: w, height: h)
         }
+        if updates == 2 { client.measureLatency() }
         if updates == 1, let clip = clipboardOut {
             print("sending clipboard \(clip.debugDescription) (unicode=\(client.supportsUnicodeClipboard))")
             client.sendClipboard(clip)
@@ -90,7 +91,7 @@ client = RFBClient(options: options, credentialProvider: { req in
                 }
             }
         }
-        if updates >= frames && (resize == nil || resized) { client.stop() }
+        if updates >= frames && (resize == nil || resized) { DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { client.stop() } }
     case .cursor(let c):
         if let c { print("cursor \(c.image.width)x\(c.image.height) hotspot \(c.hotspot)") }
     case .clipboard(let text):
@@ -117,6 +118,15 @@ if done.wait(timeout: .now() + seconds) == .timedOut {
     print("timeout after \(seconds)s with \(updates) updates")
     client.stop()
     _ = done.wait(timeout: .now() + 2)
+}
+do {
+    let st = client.statsSnapshot()
+    let enc = st.rectCount.sorted { $0.key < $1.key }.map { "\(Encoding.name($0.key))×\($0.value)/\(st.rectBytes[$0.key] ?? 0)B" }.joined(separator: " ")
+    print(String(format: "stats: updates=%d bytes=%llu link=%@ rtt=%@ continuous=%@ fence=%@ level=%@",
+                 st.updates, st.bytes, st.linkRate.map { String(format: "%.1f Mbit/s", $0 * 8 / 1e6) } ?? "-",
+                 st.rtt.map { String(format: "%.1f ms", $0 * 1000) } ?? "-", st.continuousUpdates ? "yes" : "no",
+                 st.fenceSupported ? "yes" : "no", st.level.rawValue))
+    print("  rects: \(enc)")
 }
 if !histogram.isEmpty { print("encodings seen:", histogram.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" }.joined(separator: " ")) }
 let elapsed = Date().timeIntervalSince(start)

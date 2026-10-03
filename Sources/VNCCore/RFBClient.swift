@@ -17,6 +17,22 @@ package enum Encoding {
     package static let extendedDesktopSize: Int32 = -308
     package static let desktopName: Int32 = -307
     package static let extendedClipboard = Int32(bitPattern: 0xC0A1_E5CE)
+    package static let fence: Int32 = -312
+    package static let continuousUpdates: Int32 = -313
+
+    package static func name(_ e: Int32) -> String {
+        switch e {
+        case raw: return "Raw"
+        case copyRect: return "CopyRect"
+        case rre: return "RRE"
+        case hextile: return "Hextile"
+        case zlib: return "Zlib"
+        case tight: return "Tight"
+        case zrle: return "ZRLE"
+        case cursor: return "Cursor"
+        default: return "\(e)"
+        }
+    }
     package static func jpegQuality(_ q: Int) -> Int32 { -32 + Int32(q) }
     package static func compressLevel(_ l: Int) -> Int32 { -256 + Int32(l) }
 }
@@ -36,15 +52,31 @@ package enum SecurityType: UInt8 {
 }
 
 package enum Quality: String, Codable, CaseIterable, Identifiable {
-    case lossless, balanced, low
+    case auto, lossless, balanced, low
     package var id: String { rawValue }
     package var label: String {
         switch self {
+        case .auto: return "Automatic"
         case .lossless: return "Best (lossless)"
         case .balanced: return "Balanced"
         case .low: return "Low bandwidth"
         }
     }
+}
+
+/// A snapshot of connection statistics for the stats overlay and automatic quality.
+package struct RFBStats: Sendable {
+    package var bytes: UInt64 = 0
+    package var updates = 0
+    package var rectCount: [Int32: Int] = [:]
+    package var rectBytes: [Int32: UInt64] = [:]
+    /// Receive rate while an update is streaming in (bytes/s, smoothed). Approximates the usable link rate.
+    package var linkRate: Double?
+    /// Last fence round-trip time in seconds.
+    package var rtt: Double?
+    package var continuousUpdates = false
+    package var fenceSupported = false
+    package var level: Quality = .lossless
 }
 
 package struct Credentials: Sendable {
@@ -111,6 +143,55 @@ package final class RFBClient: @unchecked Sendable {
     private let lock = NSLock()
     private var _supportsResize = false
     private var serverVersion = (3, 3)
+
+    // Stats and flow-control state (guarded by `lock`).
+    private var stats = RFBStats()
+    private var level: Quality = .lossless
+    private var cuSupported = false
+    private var cuEnabled = false
+    private var fenceSupported = false
+
+    package func statsSnapshot() -> RFBStats {
+        lock.withLock {
+            var s = stats
+            s.bytes = transport.bytesReceived &- UInt64(transport.buffered)
+            s.continuousUpdates = cuEnabled
+            s.fenceSupported = fenceSupported
+            s.level = level
+            return s
+        }
+    }
+
+    /// Changes the picture quality mid-session (re-sends SetEncodings). `.auto` is not a level.
+    package func setQualityLevel(_ q: Quality) {
+        guard q != .auto else { return }
+        let changed = lock.withLock { () -> Bool in defer { level = q }; return level != q }
+        if changed { sendEncodings() }
+    }
+
+    /// Sends a fence carrying a timestamp; the reply gives the round-trip time.
+    package func measureLatency() {
+        guard lock.withLock({ fenceSupported }) else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        let payload = (0..<8).map { UInt8(truncatingIfNeeded: now >> (56 - 8 * UInt64($0))) }
+        sendFence(flags: Fence.request | Fence.blockBefore, payload: payload)
+    }
+
+    private enum Fence {
+        static let blockBefore: UInt32 = 1 << 0
+        static let blockAfter: UInt32 = 1 << 1
+        static let syncNext: UInt32 = 1 << 2
+        static let request: UInt32 = 1 << 31
+    }
+
+    private func sendFence(flags: UInt32, payload: [UInt8]) {
+        transport.send([248, 0, 0, 0] + be32(flags) + [UInt8(payload.count)] + payload)
+    }
+
+    private func enableContinuousUpdates() {
+        guard let fb = framebuffer else { return }
+        transport.send([150, 1] + be16(0) + be16(0) + be16(fb.width) + be16(fb.height))
+    }
 
     // Extended clipboard state (guarded by `lock`).
     private var extClipboardActive = false
@@ -238,6 +319,7 @@ package final class RFBClient: @unchecked Sendable {
 
         let fb = Framebuffer(width: w, height: h)
         framebuffer = fb
+        level = options.quality == .auto ? .lossless : options.quality
         sendPixelFormat()
         sendEncodings()
         requestUpdate(incremental: false)
@@ -285,6 +367,27 @@ package final class RFBClient: @unchecked Sendable {
                 let n = Int(try transport.u16())
                 try transport.skip(n * 6)
             case 2: onEvent(.bell)
+            case 150: // EndOfContinuousUpdates: first one means "supported"; later ones mean the server stopped.
+                let enable = lock.withLock { () -> Bool in
+                    defer { cuSupported = true }
+                    if !cuSupported { cuEnabled = true; return true }
+                    cuEnabled = false
+                    return false
+                }
+                if enable { enableContinuousUpdates() } else { requestUpdate(incremental: true) }
+            case 248: // ServerFence
+                try transport.skip(3)
+                let flags = try transport.u32()
+                let payload = try transport.bytes(Int(try transport.u8()))
+                lock.withLock { fenceSupported = true }
+                if flags & Fence.request != 0 {
+                    // We process messages strictly in order, so every sync flag is already satisfied: echo it back.
+                    sendFence(flags: flags & (Fence.blockBefore | Fence.blockAfter | Fence.syncNext), payload: payload)
+                } else if payload.count == 8 {
+                    let sent = payload.reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    if now > sent { lock.withLock { stats.rtt = Double(now - sent) / 1e9 } }
+                }
             case 3:
                 try transport.skip(3)
                 let signed = try transport.s32()
@@ -305,7 +408,12 @@ package final class RFBClient: @unchecked Sendable {
         }
     }
 
+    private var consumed: UInt64 { transport.bytesReceived &- UInt64(transport.buffered) }
+
     private func framebufferUpdate() throws {
+        let startBytes = consumed - 1
+        let startTime = DispatchTime.now().uptimeNanoseconds
+        var rectCounts: [Int32: Int] = [:], rectBytes: [Int32: UInt64] = [:]
         try transport.skip(1)
         let count = Int(try transport.u16())
         var i = 0
@@ -314,6 +422,11 @@ package final class RFBClient: @unchecked Sendable {
             let x = Int(try transport.u16()), y = Int(try transport.u16())
             let w = Int(try transport.u16()), h = Int(try transport.u16())
             let enc = try transport.s32()
+            let rectStart = consumed
+            defer {
+                rectCounts[enc, default: 0] += 1
+                rectBytes[enc, default: 0] += consumed &- rectStart
+            }
             traceRect?(enc, x, y, w, h)
             guard let fb = framebuffer else { throw RFBError.protocol("update before init") }
             switch enc {
@@ -337,7 +450,20 @@ package final class RFBClient: @unchecked Sendable {
             }
             if enc == Encoding.lastRect { break }
         }
-        requestUpdate(incremental: true)
+        let total = consumed &- startBytes
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - startTime) / 1e9
+        let continuous = lock.withLock { () -> Bool in
+            stats.updates += 1
+            for (e, n) in rectCounts { stats.rectCount[e, default: 0] += n }
+            for (e, b) in rectBytes { stats.rectBytes[e, default: 0] += b }
+            // Only large updates say anything about the link; small ones are dominated by latency.
+            if total > 48 * 1024, elapsed > 0.002 {
+                let sample = Double(total) / elapsed
+                stats.linkRate = stats.linkRate.map { $0 * 0.7 + sample * 0.3 } ?? sample
+            }
+            return cuEnabled
+        }
+        if !continuous { requestUpdate(incremental: true) }
         onEvent(.updated)
     }
 
@@ -346,6 +472,7 @@ package final class RFBClient: @unchecked Sendable {
         let fb = Framebuffer(width: w, height: h)
         fb.copyContents(of: old)
         framebuffer = fb
+        if lock.withLock({ cuEnabled }) { enableContinuousUpdates() }
         onEvent(.resized(fb))
     }
 
@@ -453,16 +580,18 @@ package final class RFBClient: @unchecked Sendable {
             transport.send(msg)
             return
         }
+        let current = lock.withLock { level }
         var encs: [Int32] = [Encoding.copyRect]
-        switch options.quality {
-        case .lossless: encs += [Encoding.zrle, Encoding.tight]
+        switch current {
+        case .lossless, .auto: encs += [Encoding.zrle, Encoding.tight]
         case .balanced, .low: encs += [Encoding.tight, Encoding.zrle]
         }
         encs += [Encoding.hextile, Encoding.zlib, Encoding.rre, Encoding.raw,
                  Encoding.cursor, Encoding.desktopSize, Encoding.extendedDesktopSize,
-                 Encoding.lastRect, Encoding.desktopName, Encoding.extendedClipboard]
-        switch options.quality {
-        case .lossless: encs += [Encoding.compressLevel(1)]
+                 Encoding.lastRect, Encoding.desktopName, Encoding.extendedClipboard,
+                 Encoding.fence, Encoding.continuousUpdates]
+        switch current {
+        case .lossless, .auto: encs += [Encoding.compressLevel(1)]
         case .balanced: encs += [Encoding.jpegQuality(8), Encoding.compressLevel(2)]
         case .low: encs += [Encoding.jpegQuality(4), Encoding.compressLevel(6)]
         }
