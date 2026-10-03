@@ -4,6 +4,8 @@ vars:
   APP: vncx
   BUILD_DIR: build
   BUNDLE: '{{.BUILD_DIR}}/{{.APP}}.app'
+  # "-" is ad-hoc; CI passes the self-signed cert's SHA-1 for a stable identity.
+  SIGN_IDENTITY: '{{.SIGN_IDENTITY | default "-"}}'
 
 tasks:
   default:
@@ -28,7 +30,7 @@ tasks:
       - cp "$(swift build -c release --show-bin-path)/{{.APP}}" {{.BUNDLE}}/Contents/MacOS/{{.APP}}
       - cp Resources/Info.plist {{.BUNDLE}}/Contents/Info.plist
       - cp {{.BUILD_DIR}}/AppIcon.icns {{.BUNDLE}}/Contents/Resources/AppIcon.icns
-      - codesign --force --sign - --entitlements Resources/vncx.entitlements {{.BUNDLE}}
+      - codesign --force --sign "{{.SIGN_IDENTITY}}" --entitlements Resources/vncx.entitlements {{.BUNDLE}}
       - echo "Built {{.BUNDLE}}"
 
   icon:

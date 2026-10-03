@@ -1,0 +1,56 @@
+name: build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install task
+        run: brew install go-task
+
+      # Self-signed cert gives a stable designated requirement, so TCC and
+      # keychain grants survive across builds (ad-hoc signatures change per build).
+      - name: Import signing cert
+        env:
+          P12: ${{ secrets.MACOS_CERT_P12 }}
+          P12_PASS: ${{ secrets.MACOS_CERT_PASS }}
+        run: |
+          KC="$RUNNER_TEMP/sign.keychain-db"
+          KCPASS="$(uuidgen)"
+          echo "$P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KCPASS" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPASS" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$P12_PASS" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KCPASS" "$KC" >/dev/null
+          # shellcheck disable=SC2046 # split the existing keychain list into args
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          # The cert is untrusted, so name lookup won't find it; sign by SHA-1.
+          ID="$(security find-identity -p codesigning "$KC" | awk '/vncx Self-Signed/ {print $2; exit}')"
+          test -n "$ID" || { security find-identity -p codesigning "$KC"; exit 1; }
+          echo "SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
+
+      - name: Bundle
+        run: task bundle SIGN_IDENTITY="$SIGN_IDENTITY"
+
+      - name: Verify signature
+        run: |
+          codesign --verify --strict --verbose=2 build/vncx.app
+          codesign -dr - build/vncx.app
+
+      - name: Package
+        run: |
+          NAME="vncx-$(date -u +%Y%m%d)-${GITHUB_SHA::7}"
+          ditto -c -k --keepParent build/vncx.app "$NAME.zip"
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: ${{ env.NAME }}.zip
+          if-no-files-found: error
