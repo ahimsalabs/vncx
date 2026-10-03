@@ -1,0 +1,88 @@
+version: '3'
+
+vars:
+  APP: vncx
+  BUILD_DIR: build
+  BUNDLE: '{{.BUILD_DIR}}/{{.APP}}.app'
+
+tasks:
+  default:
+    cmds: [task --list]
+
+  build:
+    desc: Build release binary with SwiftPM
+    cmds:
+      - swift build -c release
+
+  build-debug:
+    desc: Build debug binary with SwiftPM
+    cmds:
+      - swift build
+
+  bundle:
+    desc: Assemble {{.BUNDLE}} from the release build
+    deps: [build, icon]
+    cmds:
+      - rm -rf {{.BUNDLE}}
+      - mkdir -p {{.BUNDLE}}/Contents/MacOS {{.BUNDLE}}/Contents/Resources
+      - cp "$(swift build -c release --show-bin-path)/{{.APP}}" {{.BUNDLE}}/Contents/MacOS/{{.APP}}
+      - cp Resources/Info.plist {{.BUNDLE}}/Contents/Info.plist
+      - cp {{.BUILD_DIR}}/AppIcon.icns {{.BUNDLE}}/Contents/Resources/AppIcon.icns
+      - codesign --force --sign - --entitlements Resources/vncx.entitlements {{.BUNDLE}}
+      - echo "Built {{.BUNDLE}}"
+
+  icon:
+    desc: Render the app icon into an .icns
+    sources: [Resources/icon.swift]
+    generates: ['{{.BUILD_DIR}}/AppIcon.icns']
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}/AppIcon.iconset
+      - swift Resources/icon.swift {{.BUILD_DIR}}/AppIcon.iconset
+      - iconutil -c icns {{.BUILD_DIR}}/AppIcon.iconset -o {{.BUILD_DIR}}/AppIcon.icns
+
+  run:
+    desc: Build the bundle and launch it
+    deps: [bundle]
+    cmds:
+      - open {{.BUNDLE}}
+
+  install:
+    desc: Copy the bundle into ~/Applications
+    deps: [bundle]
+    cmds:
+      - mkdir -p ~/Applications
+      - rm -rf ~/Applications/{{.APP}}.app
+      - cp -R {{.BUNDLE}} ~/Applications/{{.APP}}.app
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - swift run vncx-tests
+
+  probe:
+    desc: "Integration-test decoders against the Docker server (needs `task test-server`)"
+    cmds:
+      - swift build -c release --product vncx-probe
+      - for e in raw rre hextile zlib zrle tight tightjpeg; do echo "== $e"; "$(swift build -c release --show-bin-path)/vncx-probe" localhost:5901 --password testpass --encoding $e --frames 3 --seconds 10 || exit 1; done
+
+  check:
+    desc: Debug build of all targets
+    cmds:
+      - swift build
+
+  test-server:
+    desc: Start a Linux VNC test server in Docker on localhost:5901 (password "testpass")
+    cmds:
+      - docker build -t vncx-testserver test/
+      - docker rm -f vncx-testserver >/dev/null 2>&1 || true
+      - docker run -d --name vncx-testserver -p 5901:5900 vncx-testserver
+      - echo "VNC server on localhost:5901, password testpass"
+
+  test-server-stop:
+    desc: Stop the Docker VNC test server
+    cmds:
+      - docker rm -f vncx-testserver
+
+  clean:
+    cmds:
+      - rm -rf .build {{.BUILD_DIR}}
