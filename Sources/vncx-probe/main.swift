@@ -5,7 +5,7 @@
 // Exercises auth and decoders against real servers without the UI.
 //
 //   vncx-probe host[:port] [--password PW] [--user NAME] [--encoding raw|copyrect|rre|hextile|zlib|tight|zrle|tightjpeg]
-//              [--frames N] [--seconds S] [--out file.png] [--resize WxH]
+//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--watch]
 import Foundation
 import Network
 import CoreGraphics
@@ -21,6 +21,7 @@ func option(_ name: String) -> String? {
 let password = option("--password") ?? ProcessInfo.processInfo.environment["VNC_PASSWORD"]
 let user = option("--user") ?? ""
 let encodingName = option("--encoding")
+let quality = Quality(rawValue: option("--quality") ?? "") ?? .lossless
 let frames = Int(option("--frames") ?? "3") ?? 3
 let seconds = Double(option("--seconds") ?? "20") ?? 20
 let out = option("--out")
@@ -30,13 +31,17 @@ let clipboardOut = option("--clipboard")
 let keyCombo = option("--keys")
 let move = args.contains("--move")
 args.removeAll { $0 == "--move" }
+/// Logs every update with its time and size, and measures latency every 2 s like the app does.
+let watch = args.contains("--watch")
+args.removeAll { $0 == "--watch" }
+var lastUpdate = Date()
 guard let target = args.first, let addr = Address.parse(target) else {
     FileHandle.standardError.write("usage: vncx-probe host[:port] [--password PW] [--user NAME] [--encoding E] [--frames N] [--out file.png]\n".data(using: .utf8)!)
     exit(2)
 }
 
 var options = RFBOptions(endpoint: .hostPort(host: .init(addr.host), port: .init(integerLiteral: UInt16(addr.port))),
-                         username: user, password: password)
+                         username: user, password: password, quality: quality)
 let pseudo: [Int32] = [Encoding.cursorWithAlpha, Encoding.cursor, Encoding.desktopSize, Encoding.extendedDesktopSize, Encoding.lastRect, Encoding.desktopName]
 if let e = encodingName {
     let map: [String: [Int32]] = [
@@ -76,6 +81,12 @@ client = RFBClient(options: options, credentialProvider: { req in
         if resize != nil { resized = true }
     case .updated:
         updates += 1
+        if watch {
+            let now = Date(), bytes = client.bytesReceived
+            print(String(format: "%7.2fs update %d (+%.2fs) total %llu B", now.timeIntervalSince(start), updates,
+                         now.timeIntervalSince(lastUpdate), bytes))
+            lastUpdate = now
+        }
         if updates == 1 { print(String(format: "first update after %.2fs, %d bytes", Date().timeIntervalSince(start), client.bytesReceived)) }
         if updates == 1, let r = resize, let x = r.firstIndex(of: "x"), let w = Int(r[..<x]), let h = Int(r[r.index(after: x)...]) {
             print("requesting desktop size \(w)x\(h) (supported=\(client.supportsRemoteResize))")
@@ -102,7 +113,7 @@ client = RFBClient(options: options, credentialProvider: { req in
                 }
             }
         }
-        if updates >= frames && (resize == nil || resized) { DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { client.stop() } }
+        if updates >= frames && (resize == nil || resized) && !watch { DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { client.stop() } }
     case .cursor(let c):
         if let c { print("cursor \(c.image.width)x\(c.image.height) hotspot \(c.hotspot)") }
     case .clipboard(let text):
@@ -125,6 +136,18 @@ client.traceScreens = { reason, status, list in
     print("  layout reason=\(reason) status=\(status): \(list.map(\.description).joined(separator: ", "))")
 }
 client.start()
+let ping = DispatchSource.makeTimerSource(queue: .global())
+if watch {
+    ping.schedule(deadline: .now() + 2, repeating: 2)
+    ping.setEventHandler {
+        client.measureLatency()
+        let st = client.statsSnapshot()
+        print(String(format: "%7.2fs ping: rtt=%@ continuous=%@ silent %.1fs", Date().timeIntervalSince(start),
+                     st.rtt.map { String(format: "%.1f ms", $0 * 1000) } ?? "-", st.continuousUpdates ? "yes" : "no",
+                     Date().timeIntervalSince(lastUpdate)))
+    }
+    ping.resume()
+}
 if done.wait(timeout: .now() + seconds) == .timedOut {
     print("timeout after \(seconds)s with \(updates) updates")
     client.stop()
