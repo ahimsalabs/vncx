@@ -21,7 +21,7 @@ vncx is an AppKit and SwiftUI app with a Metal renderer, not a cross-platform to
 
 ### Large and multi-monitor remotes
 
-- **Three scaling modes:** fit with an aspect-locked window, Actual Size with mouse-follow panning, and Resize Remote. Pinch to zoom works on top of all three.
+- **Five scaling modes:** fit with an aspect-locked window, Fill Width and Fill Height, Actual Size, and Resize Remote. Whenever the image overflows the window, it pans by following the mouse. Pinch to zoom works on top of all of them.
 - **A display picker** for servers that report several screens. Show one display (remembered), or open each display in its own window and spread them across your Mac's monitors in full screen. Most clients show only the whole desktop.
 - Displays are ordered by position, not by the server's list order.
 

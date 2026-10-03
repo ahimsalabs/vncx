@@ -152,7 +152,7 @@ struct SessionView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .help("Scale to fit the window, show actual pixels, or resize the remote desktop to match the window")
+            .help("Scale to fit, fill the window's width or height, show actual pixels, or resize the remote desktop to match the window")
         }
         ToolbarItem(placement: .primaryAction) {
             Toggle(isOn: $session.viewOnly) {

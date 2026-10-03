@@ -90,6 +90,8 @@ struct AppCommands: Commands {
             let connected = s?.phase == .connected
             Picker("Scaling", selection: Binding(get: { s?.scaling ?? .fit }, set: { s?.scaling = $0 })) {
                 Text(ScalingMode.fit.label).tag(ScalingMode.fit).keyboardShortcut("1", modifiers: [.control, .command])
+                Text(ScalingMode.fillWidth.label).tag(ScalingMode.fillWidth).keyboardShortcut("4", modifiers: [.control, .command])
+                Text(ScalingMode.fillHeight.label).tag(ScalingMode.fillHeight).keyboardShortcut("5", modifiers: [.control, .command])
                 Text(ScalingMode.actual.label).tag(ScalingMode.actual).keyboardShortcut("2", modifiers: [.control, .command])
                 Text(ScalingMode.remoteResize.label).tag(ScalingMode.remoteResize).keyboardShortcut("3", modifiers: [.control, .command])
             }

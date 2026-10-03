@@ -4,11 +4,13 @@ import MetalKit
 import Carbon.HIToolbox
 
 enum ScalingMode: String, Codable, CaseIterable, Identifiable {
-    case fit, actual, remoteResize
+    case fit, fillWidth, fillHeight, actual, remoteResize
     var id: String { rawValue }
     var label: String {
         switch self {
         case .fit: return "Scale to Fit"
+        case .fillWidth: return "Fill Width"
+        case .fillHeight: return "Fill Height"
         case .actual: return "Actual Size"
         case .remoteResize: return "Resize Remote"
         }
@@ -16,6 +18,8 @@ enum ScalingMode: String, Codable, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .fit: return "arrow.down.right.and.arrow.up.left"
+        case .fillWidth: return "arrow.left.and.right"
+        case .fillHeight: return "arrow.up.and.down"
         case .actual: return "1.magnifyingglass"
         case .remoteResize: return "rectangle.expand.vertical"
         }
@@ -143,14 +147,20 @@ final class RemoteView: MTKView {
         let bw = max(bounds.width, 1), bh = max(bounds.height, 1)
         let bs = backingScale
         var s: CGFloat
+        // If we're within a pixel or two of an exact 1:1 or 2:1 device-pixel mapping, snap to it so text stays
+        // sharp (window sizes are whole points, so odd remote sizes otherwise land at 0.4995 and blur).
+        func snapped(_ scale: CGFloat) -> CGFloat {
+            let devicePixelsPerFBPixel = scale * bs
+            let nearest = devicePixelsPerFBPixel.rounded()
+            return nearest >= 1 && abs(devicePixelsPerFBPixel - nearest) * max(fw, fh) < 2 ? nearest / bs : scale
+        }
         switch scaling {
         case .fit, .remoteResize:
-            s = min(bw / fw, bh / fh)
-            // If we're within a pixel or two of an exact 1:1 or 2:1 device-pixel mapping, snap to it so text stays
-            // sharp (window sizes are whole points, so odd remote sizes otherwise land at 0.4995 and blur).
-            let devicePixelsPerFBPixel = s * bs
-            let nearest = devicePixelsPerFBPixel.rounded()
-            if nearest >= 1, abs(devicePixelsPerFBPixel - nearest) * max(fw, fh) < 2 { s = nearest / bs }
+            s = snapped(min(bw / fw, bh / fh))
+        case .fillWidth:
+            s = snapped(bw / fw)
+        case .fillHeight:
+            s = snapped(bh / fh)
         case .actual:
             s = 1 / bs
         }

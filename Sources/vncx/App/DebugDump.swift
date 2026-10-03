@@ -69,6 +69,13 @@ enum DebugDump {
             session.handleDroppedText(String(action.dropFirst(5)).replacingOccurrences(of: "\\n", with: "\n"))
         } else if action.hasPrefix("keys:"), let window = session.windowController?.window, let view = session.view {
             synthesize(String(action.dropFirst(5)), window: window, view: view)
+        } else if action.hasPrefix("scale:"), let mode = ScalingMode(rawValue: String(action.dropFirst(6))) {
+            session.scaling = mode
+        } else if action.hasPrefix("size:"), let x = action.firstIndex(of: "x"),
+                  let w = Double(action[action.index(action.startIndex, offsetBy: 5)..<x]), let h = Double(action[action.index(after: x)...]),
+                  let window = session.windowController?.window {
+            window.contentResizeIncrements = NSSize(width: 1, height: 1)
+            window.setContentSize(NSSize(width: w, height: h))
         } else if action == "onewindow" {
             session.showAllDisplaysInOneWindow()
         }

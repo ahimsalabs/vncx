@@ -90,7 +90,7 @@ Toolbar items:
 | Item | What it does |
 |---|---|
 | **Displays** | Appears for multi-monitor remotes; see [Multiple displays](#multiple-displays). |
-| **Scaling** | Switches between Scale to Fit, Actual Size and Resize Remote. |
+| **Scaling** | Switches between Scale to Fit, Fill Width, Fill Height, Actual Size and Resize Remote. |
 | **View Only** | Stops sending keyboard and mouse input, for watching without risk. |
 | **Send Keys** | Control–Alt–Delete, Control–Alt–Backspace, Command–Tab, Command–Space, Command–Q, Escape, Print Screen, Type Clipboard Text, and Send Clipboard to Remote. |
 | **Connection Stats** | Shows the [stats overlay](#picture-quality-and-connection-stats). |
@@ -105,10 +105,12 @@ Closing the window disconnects. When the window first opens, it sizes itself to 
 | Mode | Shortcut | Behavior |
 |---|---|---|
 | **Scale to Fit** | ⌃⌘1 | The whole remote desktop fits the window. The window keeps the remote's aspect ratio as you resize it, so there are no black bars. When the fit is within a pixel or two of an exact 1:1 or 2:1 mapping, vncx snaps to it so text stays sharp. |
+| **Fill Width** | ⌃⌘4 | The remote's width fills the window. If the remote is then taller than the window, moving the mouse pans up and down; if it's shorter, it's centered. The window can be any shape. |
+| **Fill Height** | ⌃⌘5 | The remote's height fills the window, panning left and right when it's wider. Good for an ultrawide remote in a narrower window: full height, sharp, and you sweep across it with the mouse. |
 | **Actual Size** | ⌃⌘2 | One remote pixel per screen pixel. If the remote is larger than the window, moving the mouse pans: the pointer's position across the window picks the matching position across the remote. |
 | **Resize Remote** | ⌃⌘3 | The server changes its resolution to match your window, in points or in Retina pixels (a per-computer option). Needs a server that supports remote resizing, such as TigerVNC, WayVNC or ReFrame. It's disabled for multi-monitor remotes, where it would collapse the layout. |
 
-**Zoom:** pinch on the trackpad to zoom from 1× to 8× on top of the current mode. A two-finger double tap toggles between unzoomed and 1:1 device pixels, or 2× if you're already at that. ⌃⌘= and ⌃⌘- zoom in and out, and ⌃⌘0 resets. While zoomed, moving the mouse pans the view the same way as Actual Size, so the point under the pointer stays put while you pinch.
+**Zoom:** pinch on the trackpad to zoom from 1× to 8× on top of the current mode. A two-finger double tap toggles between unzoomed and 1:1 device pixels, or 2× if you're already at that. ⌃⌘= and ⌃⌘- zoom in and out, and ⌃⌘0 resets. While zoomed, moving the mouse pans the view the same way as Actual Size and the fill modes, so the point under the pointer stays put while you pinch.
 
 **Smooth scaling** (Settings › Display, on by default) filters the image when it's scaled. Integer zoom levels always stay pixel-sharp. Downscaling averages each output pixel's whole footprint, so a 5K desktop in a small window stays legible instead of shimmering.
 
@@ -280,7 +282,7 @@ Edit… on a computer, or **+** in the launcher.
 | | Password | Saved to the Keychain. Leave empty to be asked. |
 | Wake-on-LAN | MAC address, Broadcast address, Send from (SSH) | See [Wake-on-LAN](#wake-on-lan). |
 | SSH | Use SSH, Destination, Tunnel, Forward to, Start server…, Upload dropped files to, Test SSH | See [SSH](#ssh). |
-| Display | Scaling | Scale to Fit, Actual Size or Resize Remote. |
+| Display | Scaling | Scale to Fit, Fill Width, Fill Height, Actual Size or Resize Remote. |
 | | Use Retina resolution when resizing remote | Resize Remote asks for pixels instead of points. |
 | | Picture quality | Automatic, Best, Balanced or Low bandwidth. |
 | | View only | Start sessions in view-only mode. |
@@ -303,6 +305,7 @@ Session. These all use ⌃⌘, so they never collide with shortcuts sent to the 
 | Shortcut | Action |
 |---|---|
 | ⌃⌘1 / ⌃⌘2 / ⌃⌘3 | Scale to Fit / Actual Size / Resize Remote |
+| ⌃⌘4 / ⌃⌘5 | Fill Width / Fill Height |
 | ⌃⌘= / ⌃⌘- / ⌃⌘0 | Zoom in / out / reset |
 | ⌃⌘O | View only |
 | ⌃⌘⌫ | Send Control–Alt–Delete |

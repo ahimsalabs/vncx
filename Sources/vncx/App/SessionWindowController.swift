@@ -64,7 +64,7 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
         case .fit:
             window.contentAspectRatio = region
             if resizeWindow && !isFullScreen { fitWindowToAspect() }
-        case .actual, .remoteResize:
+        case .fillWidth, .fillHeight, .actual, .remoteResize:
             window.contentResizeIncrements = NSSize(width: 1, height: 1) // clears the aspect ratio constraint
             if resizeWindow && !isFullScreen && session.scaling == .actual { resizeToIdeal() }
         }

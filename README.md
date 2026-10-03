@@ -7,7 +7,7 @@ vncx connects to macOS Screen Sharing, WayVNC, TigerVNC, ReFrame and other RFB (
 ## Highlights
 
 - **Sharp on Retina.** The remote framebuffer lives in GPU-shared memory and is drawn by a Metal shader, with no per-frame copies. At 1:1 and integer zoom levels every remote pixel maps to whole device pixels. Large remotes (4K, 5K, 6K) are downscaled with a box filter instead of being aliased.
-- **Scaling that fits how you work.** Scale to Fit locks the window to the remote's aspect ratio. Actual Size shows pixels 1:1 and pans as you move the mouse. Resize Remote makes the server match your window. Pinch to zoom works on top of any of them.
+- **Scaling that fits how you work.** Scale to Fit locks the window to the remote's aspect ratio. Fill Width and Fill Height fill one dimension and pan along the other as you move the mouse, which is handy for ultrawide or tall remotes. Actual Size shows pixels 1:1. Resize Remote makes the server match your window. Pinch to zoom works on top of any of them.
 - **Multi-monitor remotes.** Show all displays, pick one (remembered per computer), or open each display in its own window and put them full screen on different Mac displays.
 - **macOS Screen Sharing.** Log in with a macOS account (Apple Remote Desktop authentication) as well as with a standard VNC password.
 - **Built for real networks.** Automatic quality picks lossless or JPEG from the measured link speed and latency. Dropped connections, sleep and network changes reconnect automatically. A stats overlay shows frame rate, bandwidth, latency and encodings.
