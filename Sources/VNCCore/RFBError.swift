@@ -2,6 +2,8 @@ import Foundation
 
 package enum RFBError: LocalizedError, Equatable {
     case connection(String)
+    /// Nothing is listening on the port (or an SSH tunnel couldn't reach it).
+    case refused
     case `protocol`(String)
     case auth(String)
     case authFailed(String)
@@ -16,6 +18,7 @@ package enum RFBError: LocalizedError, Equatable {
         case .authFailed(let s): return s.isEmpty ? "Authentication failed." : "Authentication failed: \(s)"
         case .cancelled: return "Cancelled."
         case .closed: return "The server closed the connection."
+        case .refused: return "Connection refused. Is screen sharing / the VNC server running?"
         }
     }
 }

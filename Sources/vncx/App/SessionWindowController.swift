@@ -190,4 +190,6 @@ final class SessionManager {
     }
 
     var hasSessions: Bool { !controllers.isEmpty }
+
+    func disconnectAll() { controllers.values.forEach { $0.session.disconnect() } }
 }

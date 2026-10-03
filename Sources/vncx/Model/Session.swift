@@ -31,6 +31,8 @@ final class Session: Identifiable {
     private(set) var framebufferSize: CGSize = .zero
     private(set) var throughput = ""
     private(set) var securityType: SecurityType?
+    /// Extra detail for the connecting overlay ("Opening SSH tunnel…").
+    private(set) var statusDetail: String?
     var credentialPrompt: CredentialPrompt?
     /// Current pinch zoom of the main view (1 = none), mirrored from the view for the UI.
     var zoom: CGFloat = 1
@@ -70,6 +72,8 @@ final class Session: Identifiable {
     @ObservationIgnored private var reconnectWork: DispatchWorkItem?
     @ObservationIgnored private var reconnectAttempt = 0
     @ObservationIgnored private var watchdog: DispatchWorkItem?
+    @ObservationIgnored private var tunnel: SSHTunnel?
+    @ObservationIgnored private var triedStartCommand = false
     private static let retryDelays: [TimeInterval] = [1, 2, 3, 5, 8, 13, 20, 30]
     private static let maxReconnectAttempts = 30
 
@@ -106,9 +110,40 @@ final class Session: Identifiable {
         let gen = generation
         if case .reconnecting = phase {} else { phase = .connecting }
         credentialPrompt = nil
+        statusDetail = nil
+
+        if config.ssh.enabled && config.ssh.tunnel && !(tunnel?.isRunning ?? false) {
+            if config.bonjourName != nil && config.ssh.destination.isEmpty {
+                phase = .disconnected("Set an SSH destination to tunnel a Bonjour computer.")
+                return
+            }
+            tunnel?.close()
+            tunnel = nil
+            statusDetail = "Opening SSH tunnel to \(config.sshDestination)…"
+            SSHTunnel.open(destination: config.sshDestination, remoteHost: config.ssh.tunnelHost, remotePort: config.port) { [weak self] result in
+                guard let self, self.generation == gen else { if case .success(let t) = result { t.close() }; return }
+                switch result {
+                case .success(let t):
+                    self.tunnel = t
+                    self.startClient(generation: gen)
+                case .failure(let error):
+                    self.statusDetail = nil
+                    if self.isReconnecting { self.scheduleReconnect(reason: error.localizedDescription) }
+                    else { self.phase = .disconnected(error.localizedDescription) }
+                }
+            }
+            return
+        }
+        startClient(generation: gen)
+    }
+
+    private func startClient(generation gen: Int) {
+        statusDetail = nil
 
         let endpoint: NWEndpoint
-        if let name = config.bonjourName {
+        if let tunnel, config.ssh.enabled && config.ssh.tunnel {
+            endpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(integerLiteral: tunnel.localPort))
+        } else if let name = config.bonjourName {
             endpoint = BonjourBrowser.shared.endpoint(named: name)
         } else {
             endpoint = .hostPort(host: NWEndpoint.Host(config.host), port: NWEndpoint.Port(integerLiteral: UInt16(clamping: config.port)))
@@ -149,6 +184,9 @@ final class Session: Identifiable {
         credentialPrompt = nil
         client?.stop()
         client = nil
+        tunnel?.close()
+        tunnel = nil
+        statusDetail = nil
         saveThumbnail()
         statsTimer?.invalidate()
         if phase != .disconnected(nil) { phase = .disconnected(nil) }
@@ -222,7 +260,9 @@ final class Session: Identifiable {
         switch event {
         case .connected(let name, let fb, let sec):
             phase = .connected
+            statusDetail = nil
             reconnectAttempt = 0
+            triedStartCommand = false
             if let used = client?.usedCredentials { sessionCredentials = used }
             desktopName = name
             securityType = sec
@@ -260,6 +300,14 @@ final class Session: Identifiable {
             client = nil
             credentialPrompt = nil
             let message = error?.localizedDescription ?? (hasConnectedOnce ? "The connection was closed." : nil)
+            // Nobody listening (or the tunnel's far end refused): try starting the server over SSH once.
+            let unreachable: Bool = {
+                switch error as? RFBError { case .refused?, .closed?: return true; default: return false }
+            }()
+            if !wasConnected, unreachable, config.ssh.enabled, !config.ssh.startCommand.isEmpty, !triedStartCommand {
+                runStartCommand()
+                return
+            }
             if case .authFailed = error as? RFBError {
                 lastAuthFailed = true
                 sessionCredentials = nil
@@ -310,7 +358,31 @@ final class Session: Identifiable {
         if force || store.connection(config.id) != nil { store.upsert(config) }
     }
 
+    private func runStartCommand() {
+        triedStartCommand = true
+        let gen = generation
+        let destination = config.sshDestination
+        let command = config.ssh.startCommand.replacingOccurrences(of: "{port}", with: String(config.port))
+        statusDetail = "Starting the VNC server on \(destination)…"
+        if case .reconnecting = phase {} else { phase = .connecting }
+        SSH.run(destination, command: command) { [weak self] result in
+            guard let self, self.generation == gen else { return }
+            switch result {
+            case .success:
+                self.statusDetail = "Waiting for the VNC server…"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self, self.generation == gen else { return }
+                    self.connect()
+                }
+            case .failure(let error):
+                self.statusDetail = nil
+                self.phase = .disconnected("Couldn’t start the VNC server over SSH: \(error.localizedDescription)")
+            }
+        }
+    }
+
     func reconnect() {
+        triedStartCommand = false
         reconnectAttempt = 0
         connect()
     }

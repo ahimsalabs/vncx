@@ -21,8 +21,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Command-line convenience: `vncx host[:port]` connects immediately.
         let args = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         for a in args { _ = SessionManager.shared.open(address: a) }
+        // Development: VNCX_OPEN_JSON=/path/connection.json opens a fully specified connection (not saved).
+        if let path = ProcessInfo.processInfo.environment["VNCX_OPEN_JSON"],
+           let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let config = try? JSONDecoder().decode(SavedConnection.self, from: data) {
+            SessionManager.shared.open(config)
+        }
         NSWindow.allowsAutomaticWindowTabbing = true
         DebugDump.installIfRequested()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        SessionManager.shared.disconnectAll()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

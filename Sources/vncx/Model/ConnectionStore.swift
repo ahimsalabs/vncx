@@ -31,12 +31,19 @@ struct SavedConnection: Codable, Identifiable, Hashable {
     var lastResolution: String?
     /// What to show locally when the server never sends cursor shapes.
     var localCursor: LocalCursorMode = .arrow
+    var ssh = SSHSettings()
+
+    /// The SSH destination to use (defaults to the VNC host).
+    var sshDestination: String {
+        let d = ssh.destination.trimmingCharacters(in: .whitespaces)
+        return d.isEmpty ? host : d
+    }
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case id, name, host, port, username, bonjourName, quality, scaling, viewOnly, remoteResizeRetina
-        case lastConnected, lastResolution, localCursor
+        case lastConnected, lastResolution, localCursor, ssh
     }
 
     /// Tolerant decoding: any missing or unreadable key keeps its default, so adding settings never
@@ -57,6 +64,7 @@ struct SavedConnection: Codable, Identifiable, Hashable {
         lastConnected = get(.lastConnected, lastConnected)
         lastResolution = get(.lastResolution, lastResolution)
         localCursor = get(.localCursor, localCursor)
+        ssh = get(.ssh, ssh)
     }
 
     var title: String { name.isEmpty ? (bonjourName ?? Address(host: host, port: port).display) : name }

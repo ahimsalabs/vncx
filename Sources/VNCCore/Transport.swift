@@ -56,10 +56,10 @@ package final class Transport: @unchecked Sendable {
                 ready.signal()
             case .waiting(let err):
                 // .waiting means "no route right now"; treat as failure so the UI can report it.
-                failure = RFBError.connection(Transport.describe(err))
+                failure = Transport.error(err)
                 ready.signal()
             case .failed(let err):
-                failure = RFBError.connection(Transport.describe(err))
+                failure = Transport.error(err)
                 ready.signal()
                 self?.readSignal.signal()
             case .cancelled:
@@ -184,6 +184,11 @@ package final class Transport: @unchecked Sendable {
 
     package func send(_ bytes: [UInt8]) {
         connection.send(content: Data(bytes), completion: .idempotent)
+    }
+
+    static func error(_ err: NWError) -> RFBError {
+        if case .posix(.ECONNREFUSED) = err { return .refused }
+        return .connection(describe(err))
     }
 
     package static func describe(_ error: NWError) -> String {

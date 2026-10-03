@@ -51,6 +51,9 @@ struct SessionView: View {
                 VStack(spacing: 14) {
                     ProgressView().controlSize(.large)
                     Text("Connecting to \(session.config.title)…").font(.title3)
+                    if let detail = session.statusDetail {
+                        Text(detail).foregroundStyle(.secondary)
+                    }
                     Button("Cancel") { session.window?.close() }
                         .keyboardShortcut(.cancelAction)
                 }

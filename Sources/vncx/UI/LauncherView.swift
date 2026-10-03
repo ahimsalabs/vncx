@@ -229,6 +229,41 @@ struct ConnectionEditor: View {
                     TextField("User name", text: $connection.username, prompt: Text("For macOS Screen Sharing"))
                     SecureField("Password", text: $password, prompt: Text(hadPassword ? "Saved in keychain" : "Ask when connecting"))
                 }
+                Section("SSH") {
+                    Toggle("Use SSH", isOn: $connection.ssh.enabled)
+                    if connection.ssh.enabled {
+                        TextField("Destination", text: $connection.ssh.destination,
+                                  prompt: Text(parsed.map { $0.host.isEmpty ? "user@host or ssh config alias" : $0.host } ?? "user@host"))
+                        Toggle("Tunnel the VNC connection through SSH", isOn: $connection.ssh.tunnel)
+                        if connection.ssh.tunnel {
+                            TextField("Forward to", text: $connection.ssh.tunnelHost, prompt: Text("localhost"))
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Start server if it isn’t running")
+                                Spacer()
+                                Menu("Presets") {
+                                    Button("WayVNC (all displays)") { connection.ssh.startCommand = SSHSettings.wayvncPreset }
+                                    Button("TigerVNC (vncserver)") { connection.ssh.startCommand = SSHSettings.tigervncPreset }
+                                    Divider()
+                                    Button("None") { connection.ssh.startCommand = "" }
+                                }
+                                .fixedSize()
+                            }
+                            TextField("", text: $connection.ssh.startCommand, prompt: Text("Shell command; {port} is the VNC port"), axis: .vertical)
+                                .lineLimit(2...5)
+                                .font(.system(.caption, design: .monospaced))
+                                .labelsHidden()
+                        }
+                        HStack {
+                            Button("Test SSH") { testSSH() }.disabled(sshTesting)
+                            if sshTesting { ProgressView().controlSize(.small) }
+                            if let sshResult { Text(sshResult).font(.caption).foregroundStyle(sshOK ? Color.secondary : Color.red).lineLimit(3) }
+                        }
+                        Text("Uses /usr/bin/ssh with your ~/.ssh/config. Login must work without a password prompt (key or agent).")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Section("Display") {
                     Picker("Scaling", selection: $connection.scaling) {
                         ForEach(ScalingMode.allCases) { Text($0.label).tag($0) }
@@ -253,8 +288,27 @@ struct ConnectionEditor: View {
             }
             .padding()
         }
-        .frame(width: 460)
+        .frame(width: 500)
+        .frame(maxHeight: 720)
         .onAppear { hadPassword = Keychain.password(for: connection.keychainAccount) != nil }
+    }
+
+    @State private var sshTesting = false
+    @State private var sshResult: String?
+    @State private var sshOK = false
+
+    private func testSSH() {
+        var c = connection
+        if let a = parsed, c.bonjourName == nil { c.host = a.host }
+        sshTesting = true
+        sshResult = nil
+        SSH.run(c.sshDestination, command: "uname -sn", timeout: 15) { result in
+            sshTesting = false
+            switch result {
+            case .success(let out): sshOK = true; sshResult = "Connected: " + out.trimmingCharacters(in: .whitespacesAndNewlines)
+            case .failure(let e): sshOK = false; sshResult = e.localizedDescription
+            }
+        }
     }
 
     private func save() {
