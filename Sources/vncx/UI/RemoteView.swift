@@ -54,15 +54,54 @@ final class RemoteView: MTKView {
     var remoteCursor: RemoteCursor? { didSet { rebuildCursor() } }
 
     var backgroundRGBA = SIMD4<Float>(0, 0, 0, 1)
+    /// Where the visible part sits within the overflow on each axis: 0 shows the left/top edge, 1 the right/bottom.
     private var panFraction = CGPoint(x: 0.5, y: 0.5)
+    /// The pointer's previous position, for edge pushing. nil after it leaves the view.
+    private var lastPanPoint: CGPoint?
 
+    /// Pans when the pointer pushes into a band along an edge, and holds still everywhere else. Moving toward an
+    /// edge inside its band scrolls proportionally, so the remote's edge is fully in view a little before the pointer
+    /// reaches the view's edge; moving back out leaves the view where it is. Following the pointer continuously
+    /// makes the whole picture swim with every small movement, and shows the remote's edges only with the pointer
+    /// pressed against them.
     private func updatePan(_ p: CGPoint) {
-        guard bounds.width > 0, bounds.height > 0 else { return }
-        let fx = min(max(p.x / bounds.width, 0), 1), fy = min(max(p.y / bounds.height, 0), 1)
-        guard abs(fx - panFraction.x) > 0.0001 || abs(fy - panFraction.y) > 0.0001 else { return }
-        panFraction = CGPoint(x: fx, y: fy)
+        defer { lastPanPoint = p }
+        guard let last = lastPanPoint, bounds.width > 0, bounds.height > 0 else { return }
+        func push(_ f: CGFloat, _ p: CGFloat, _ last: CGFloat, _ length: CGFloat) -> CGFloat {
+            let band = min(max(length * 0.2, 40), 240), snap = band * 0.3
+            // Distance into the band, from where the edge is fully shown, before and after the move.
+            func shrink(_ f: CGFloat, _ d: CGFloat, _ lastD: CGFloat) -> CGFloat {
+                let ref = min(lastD, band) - snap
+                return ref > 0 ? f * max(d - snap, 0) / ref : 0
+            }
+            if p < last && p < band { return shrink(f, p, last) }
+            let d = length - p, lastD = length - last
+            if d < lastD && d < band { return 1 - shrink(1 - f, d, lastD) }
+            return f
+        }
+        setPan(CGPoint(x: push(panFraction.x, p.x, last.x, bounds.width),
+                       y: push(panFraction.y, p.y, last.y, bounds.height)))
+    }
+
+    private func setPan(_ f: CGPoint) {
+        let f = CGPoint(x: min(max(f.x, 0), 1), y: min(max(f.y, 0), 1))
+        guard abs(f.x - panFraction.x) > 0.0001 || abs(f.y - panFraction.y) > 0.0001 else { return }
+        panFraction = f
         if isPanning { needsDisplay = true }
     }
+
+    /// Changes zoom keeping the framebuffer point under `anchor` (a view point) where it is.
+    private func zoom(to z: CGFloat, anchor p: CGPoint) {
+        let before = currentLayout()
+        let fbx = (p.x - before.dst.minX) / before.scale + before.srcOrigin.x
+        let fby = (p.y - before.dst.minY) / before.scale + before.srcOrigin.y
+        setZoom(z)
+        let s = currentLayout().scale, r = region
+        let overflowX = r.width - bounds.width / s, overflowY = r.height - bounds.height / s
+        setPan(CGPoint(x: overflowX > 0 ? (fbx - r.minX - p.x / s) / overflowX : panFraction.x,
+                       y: overflowY > 0 ? (fby - r.minY - p.y / s) / overflowY : panFraction.y))
+    }
+
     private var buttons: UInt8 = 0
     private var pressedKeys: [UInt16: UInt32] = [:]
     private var pressedModifiers: [UInt16: UInt32] = [:]
@@ -194,19 +233,18 @@ final class RemoteView: MTKView {
     func setZoom(_ z: CGFloat) { zoom = min(max(z, 1), Self.maxZoom) }
 
     override func magnify(with event: NSEvent) {
-        updatePan(convert(event.locationInWindow, from: nil))
         var z = zoom * (1 + event.magnification)
         if z < 1.03 { z = 1 } // settle exactly at 1 so the unzoomed view stays pixel-snapped
-        setZoom(z)
+        zoom(to: z, anchor: convert(event.locationInWindow, from: nil))
     }
 
     /// Two-finger double tap: zoom to 1:1 device pixels (or 2x if already at least that), or back out.
     override func smartMagnify(with event: NSEvent) {
-        updatePan(convert(event.locationInWindow, from: nil))
-        if zoom > 1 { setZoom(1); return }
+        let p = convert(event.locationInWindow, from: nil)
+        if zoom > 1 { zoom(to: 1, anchor: p); return }
         let base = currentLayout().scale
         let pixelExact = (1 / backingScale) / base
-        setZoom(pixelExact > 1.2 ? pixelExact : 2)
+        zoom(to: pixelExact > 1.2 ? pixelExact : 2, anchor: p)
     }
 
     /// The window content size that shows the framebuffer pixel-for-pixel, capped to the screen.
@@ -342,9 +380,13 @@ final class RemoteView: MTKView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect, .cursorUpdate],
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect, .cursorUpdate],
                                        owner: self, userInfo: nil))
     }
+
+    // Re-entering from another side must not count as a push from where the pointer left.
+    override func mouseEntered(with event: NSEvent) { lastPanPoint = nil }
+    override func mouseExited(with event: NSEvent) { lastPanPoint = nil }
 
     override func cursorUpdate(with event: NSEvent) { activeCursor.set() }
 
@@ -362,7 +404,16 @@ final class RemoteView: MTKView {
                 min(max(y, Int(r.minY)), min(Int(r.maxY), fb.height) - 1))
     }
 
+    /// Area covered by a control drawn over the view (the full screen floating bar), in view coordinates.
+    /// The pointer there belongs to the control, unless a button is held from a press that started on the remote.
+    var overlayRect: CGRect?
+
     private func sendPointer(_ event: NSEvent) {
+        if buttons == 0, let r = overlayRect, r.contains(convert(event.locationInWindow, from: nil)) {
+            NSCursor.arrow.set()
+            lastPanPoint = nil
+            return
+        }
         activeCursor.set()
         guard let pt = framebufferPoint(event) else { return }
         guard !viewOnly, let session else { return }

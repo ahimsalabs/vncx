@@ -199,10 +199,10 @@ struct NearbyCard: View {
             Image(systemName: "desktopcomputer").font(.title2).foregroundStyle(.tint).frame(width: 36)
             VStack(alignment: .leading) {
                 Text(name).font(.body.weight(.medium)).lineLimit(1)
-                Text("Screen Sharing · Bonjour").font(.caption).foregroundStyle(.secondary)
+                Text("Screen Sharing").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
-            Button("Connect") { SessionManager.shared.open(bonjour: name) }.controlSize(.small)
+            Button("Connect") { SessionManager.shared.open(bonjour: name) }.controlSize(.small).fixedSize()
         }
         .padding(12)
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
@@ -388,6 +388,11 @@ struct SettingsView: View {
                 Picker("Default picture quality", selection: $prefs.defaultQuality) {
                     ForEach(Quality.allCases) { Text($0.label).tag($0) }
                 }
+                Picker("Toolbar in full screen", selection: $prefs.fullScreenToolbar) {
+                    ForEach(FullScreenToolbar.allCases) { Text($0.label).tag($0) }
+                }
+                Text("Floating Bar keeps the Mac's menu bar and Dock hidden, so every edge and corner reaches the remote; a small tab at the top center opens into the controls. Hide with Menu Bar shows the toolbar with the menu bar when the pointer reaches the top of the screen.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .formStyle(.grouped)
             .tabItem { Label("Display", systemImage: "display") }

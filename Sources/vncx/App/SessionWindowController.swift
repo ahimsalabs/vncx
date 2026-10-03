@@ -14,6 +14,7 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
     let displayID: UInt32?
     var isAuxiliary: Bool { displayID != nil }
     private var remoteView: RemoteView? { session.remoteView(for: displayID) }
+    let chrome = SessionChrome()
 
     init(session: Session, displayID: UInt32? = nil) {
         self.session = session
@@ -29,7 +30,7 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
         window.backgroundColor = .black
         window.minSize = NSSize(width: 320, height: 200)
 
-        let host = NSHostingController(rootView: SessionView(session: session, displayID: displayID))
+        let host = NSHostingController(rootView: SessionView(session: session, displayID: displayID, chrome: chrome))
         host.sizingOptions = []
         host.sceneBridgingOptions = [.toolbars, .title]
         window.contentViewController = host
@@ -37,6 +38,7 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
         window.center()
         super.init(window: window)
         window.delegate = self
+        chrome.exitFullScreen = { [weak window] in window?.toggleFullScreen(nil) }
         if let displayID {
             session.auxControllers[displayID] = self
             window.tabbingMode = .disallowed
@@ -128,6 +130,38 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
         if SessionManager.shared.activeSession === session { SessionManager.shared.activeSession = nil }
         DispatchQueue.main.async { KeyboardCapture.shared.update() }
     }
+
+    func window(_ window: NSWindow, willUseFullScreenPresentationOptions proposed: NSApplication.PresentationOptions = []) -> NSApplication.PresentationOptions {
+        Self.presentationOptions(proposed)
+    }
+
+    private static func presentationOptions(_ base: NSApplication.PresentationOptions) -> NSApplication.PresentationOptions {
+        var o = base.subtracting([.autoHideMenuBar, .autoHideDock, .autoHideToolbar, .hideMenuBar, .hideDock])
+        switch Preferences.shared.fullScreenToolbar {
+        // The Mac's menu bar and Dock would slide over the remote's own at the top and bottom edges, and the
+        // menu bar takes the pointer before it reaches the remote's top corners (hot corners, the Apple menu).
+        case .island: o.formUnion([.hideMenuBar, .hideDock])
+        case .autoHide: o.formUnion([.autoHideMenuBar, .autoHideDock, .autoHideToolbar])
+        case .visible: o.formUnion([.autoHideMenuBar, .autoHideDock])
+        }
+        return o
+    }
+
+    /// Hides the toolbar in favor of the floating bar, or brings it back, to match the preference and full screen state.
+    func applyFullScreenChrome(fullScreen: Bool? = nil) {
+        guard let window else { return }
+        let style = Preferences.shared.fullScreenToolbar
+        let fs = fullScreen ?? isFullScreen
+        chrome.island = fs && style == .island
+        window.toolbar?.isVisible = !chrome.island
+        // Presentation options belong to the active full screen space, so only the key window may change them.
+        if fs && fullScreen == nil && window.isKeyWindow {
+            NSApp.presentationOptions = Self.presentationOptions(NSApp.presentationOptions)
+        }
+    }
+
+    func windowWillEnterFullScreen(_ notification: Notification) { applyFullScreenChrome(fullScreen: true) }
+    func windowWillExitFullScreen(_ notification: Notification) { applyFullScreenChrome(fullScreen: false) }
 
     func windowDidEnterFullScreen(_ notification: Notification) {
         remoteView?.remoteResizeIfNeeded()
@@ -240,6 +274,10 @@ final class SessionManager {
         guard let w = session.windowController?.window else { return }
         w.makeKeyAndOrderFront(nil)
         NSApp.activate()
+    }
+
+    func applyFullScreenChrome() {
+        (controllers.values + auxiliary).forEach { $0.applyFullScreenChrome() }
     }
 
     func disconnectAll() { controllers.values.forEach { $0.session.disconnect() } }

@@ -79,7 +79,7 @@ You can also save a password ahead of time in the connection editor (Edit…).
 
 ## The session window
 
-Each session is a standard Mac window. It supports full screen (⌃⌘F or the green button), tabs (Window › Merge All Windows), Stage Manager, and dark mode. The title shows the remote desktop name. The subtitle shows the resolution, current bandwidth, zoom level, and **View Only** when that's on.
+Each session is a standard Mac window. It supports full screen (⌃⌘F or the green button; the toolbar becomes a floating bar there, see Settings › Display), tabs (Window › Merge All Windows), Stage Manager, and dark mode. The title shows the remote desktop name. The subtitle shows the resolution, current bandwidth, zoom level, and **View Only** when that's on.
 
 Toolbar items:
 
@@ -103,10 +103,12 @@ Closing the window disconnects. When the window first opens, it sizes itself to 
 | **Scale to Fit** | ⌃⌘1 | The whole remote desktop fits the window. The window keeps the remote's aspect ratio as you resize it, so there are no black bars. When the fit is within a pixel or two of an exact 1:1 or 2:1 mapping, vncx snaps to it so text stays sharp. |
 | **Fill Width** | ⌃⌘4 | The remote's width fills the window. If the remote is then taller than the window, moving the mouse pans up and down; if it's shorter, it's centered. The window can be any shape. |
 | **Fill Height** | ⌃⌘5 | The remote's height fills the window, panning left and right when it's wider. Good for an ultrawide remote in a narrower window: full height, sharp, and you sweep across it with the mouse. |
-| **Actual Size** | ⌃⌘2 | One remote pixel per screen pixel. If the remote is larger than the window, moving the mouse pans: the pointer's position across the window picks the matching position across the remote. |
+| **Actual Size** | ⌃⌘2 | One remote pixel per screen pixel. If the remote is larger than the window, moving the mouse pans (see **Panning** below). |
 | **Resize Remote** | ⌃⌘3 | The server changes its resolution to match your window, in points or in Retina pixels (a per-computer option). Needs a server that supports remote resizing, such as TigerVNC, WayVNC or ReFrame. It's disabled for multi-monitor remotes, where it would collapse the layout. |
 
-**Zoom:** pinch on the trackpad to zoom from 1× to 8× on top of the current mode. A two-finger double tap toggles between unzoomed and 1:1 device pixels, or 2× if you're already at that. ⌃⌘= and ⌃⌘- zoom in and out, and ⌃⌘0 resets. While zoomed, moving the mouse pans the view the same way as Actual Size and the fill modes, so the point under the pointer stays put while you pinch.
+**Zoom:** pinch on the trackpad to zoom from 1× to 8× on top of the current mode. A two-finger double tap toggles between unzoomed and 1:1 device pixels, or 2× if you're already at that. ⌃⌘= and ⌃⌘- zoom in and out, and ⌃⌘0 resets. Pinching keeps the point under the pointer where it is. While zoomed, moving the mouse pans the view the same way as Actual Size and the fill modes.
+
+**Panning:** when the picture is larger than the window, it stays still while you work and only moves when you push the pointer toward an edge. Each edge has a band (a fifth of the window, up to 240 points). Moving toward the edge inside the band scrolls the remote that way, and the remote's edge is fully in view a little before the pointer reaches the window's edge. Moving back out of the band leaves the view where it is, so you can work near the remote's edge without holding the pointer against it.
 
 **Smooth scaling** (Settings › Display, on by default) filters the image when it's scaled. Integer zoom levels always stay pixel-sharp. Downscaling averages each output pixel's whole footprint, so a 5K desktop in a small window stays legible instead of shimmering.
 
@@ -265,6 +267,7 @@ Open with ⌘,.
 | Smooth scaling | On | Off uses nearest-neighbor everywhere. |
 | Default scaling | Scale to Fit | For new computers. |
 | Default picture quality | Automatic | For new computers. |
+| Toolbar in full screen | Floating Bar | **Floating Bar** keeps the Mac's menu bar and Dock hidden, so the pointer reaches the remote's edges and corners (its menu bar, Dock and hot corners) instead of revealing the Mac's. A small tab at the top center opens into the controls, with an Exit Full Screen button, while the pointer is over it; ⌃⌘ shortcuts keep working. **Hide with Menu Bar** shows the toolbar with the Mac's menu bar when the pointer reaches the top of the screen. **Always Show** keeps the toolbar on screen. |
 
 ## Connection settings reference
 

@@ -35,6 +35,9 @@ final class Preferences {
     var defaultScaling: ScalingMode {
         didSet { defaults.set(defaultScaling.rawValue, forKey: "defaultScaling") }
     }
+    var fullScreenToolbar: FullScreenToolbar {
+        didSet { defaults.set(fullScreenToolbar.rawValue, forKey: "fullScreenToolbar"); SessionManager.shared.applyFullScreenChrome() }
+    }
 
     private init() {
         commandKey = CommandKeyMapping(rawValue: defaults.string(forKey: "commandKey") ?? "") ?? .superKey
@@ -45,5 +48,19 @@ final class Preferences {
         smoothScaling = defaults.object(forKey: "smoothScaling") as? Bool ?? true
         defaultQuality = Quality(rawValue: defaults.string(forKey: "defaultQuality") ?? "") ?? .auto
         defaultScaling = ScalingMode(rawValue: defaults.string(forKey: "defaultScaling") ?? "") ?? .fit
+        fullScreenToolbar = FullScreenToolbar(rawValue: defaults.string(forKey: "fullScreenToolbar") ?? "") ?? .island
+    }
+}
+
+/// How a session window's toolbar behaves in full screen.
+enum FullScreenToolbar: String, Codable, CaseIterable, Identifiable {
+    case autoHide, island, visible
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .autoHide: return "Hide with Menu Bar"
+        case .island: return "Floating Bar"
+        case .visible: return "Always Show"
+        }
     }
 }

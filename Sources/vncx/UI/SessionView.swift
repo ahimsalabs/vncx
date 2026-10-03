@@ -33,9 +33,18 @@ struct RemoteViewRepresentable: NSViewRepresentable {
     }
 }
 
+/// Per-window chrome state the window controller shares with its SwiftUI content.
+@Observable
+final class SessionChrome {
+    /// Full screen with the toolbar replaced by the floating bar.
+    var island = false
+    @ObservationIgnored var exitFullScreen: () -> Void = {}
+}
+
 struct SessionView: View {
     @Bindable var session: Session
     var displayID: UInt32?
+    var chrome: SessionChrome
 
     private var windowTitle: String {
         guard let d = session.display(displayID) else { return session.title }
@@ -68,7 +77,12 @@ struct SessionView: View {
                     .padding(12)
                     .allowsHitTesting(false)
             }
+            if chrome.island {
+                FloatingBar(session: session, displayID: displayID, chrome: chrome)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
         }
+        .coordinateSpace(.named(FloatingBar.space))
         .background(Color.black)
         .ignoresSafeArea(.container, edges: .bottom)
         .navigationTitle(windowTitle)
@@ -138,55 +152,156 @@ struct SessionView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        if displayID == nil && session.displays.count > 1 {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    DisplayMenu(session: session)
-                } label: {
-                    Label("Displays", systemImage: "rectangle.on.rectangle")
+        let controls = SessionControls(session: session, displayID: displayID)
+        if controls.showsDisplays {
+            ToolbarItem(placement: .primaryAction) { controls.displays }
+        }
+        ToolbarItem(placement: .primaryAction) { controls.scaling }
+        ToolbarItem(placement: .primaryAction) { controls.viewOnly }
+        ToolbarItem(placement: .primaryAction) { controls.sendKeys }
+        ToolbarItem(placement: .primaryAction) { controls.stats }
+        ToolbarItem(placement: .primaryAction) { controls.screenshot }
+    }
+}
+
+/// The session's toolbar controls, shared by the window toolbar and the full screen floating bar.
+struct SessionControls {
+    @Bindable var session: Session
+    var displayID: UInt32?
+
+    var showsDisplays: Bool { displayID == nil && session.displays.count > 1 }
+
+    var displays: some View {
+        Menu {
+            DisplayMenu(session: session)
+        } label: {
+            Label("Displays", systemImage: "rectangle.on.rectangle")
+        }
+        .help("Choose which remote display to show")
+    }
+
+    var scaling: some View {
+        Picker("Scaling", selection: $session.scaling) {
+            ForEach(ScalingMode.allCases) { mode in
+                Label(mode.label, systemImage: mode.symbol).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .help("Scale to fit, fill the window's width or height, show actual pixels, or resize the remote desktop to match the window")
+    }
+
+    var viewOnly: some View {
+        Toggle(isOn: $session.viewOnly) {
+            Label("View Only", systemImage: session.viewOnly ? "eye" : "computermouse")
+        }
+        .help(session.viewOnly ? "View only: input is not sent" : "Controlling: click to switch to view only")
+    }
+
+    var sendKeys: some View {
+        Menu {
+            SendKeysMenu(session: session)
+        } label: {
+            Label("Send Keys", systemImage: "keyboard")
+        }
+        .help("Send special keys and clipboard text")
+        .disabled(session.phase != .connected)
+    }
+
+    var stats: some View {
+        Toggle(isOn: $session.showStats) {
+            Label("Connection Stats", systemImage: "gauge.with.dots.needle.33percent")
+        }
+        .help("Show frame rate, bandwidth, latency and encoding (⌃⌘I)")
+    }
+
+    var screenshot: some View {
+        Menu {
+            Button("Save Screenshot to Desktop") { session.saveScreenshot() }
+            Button("Copy Screenshot") { session.copyScreenshot() }
+        } label: {
+            Label("Screenshot", systemImage: "camera")
+        }
+        .disabled(session.phase != .connected)
+    }
+}
+
+/// Stands in for the toolbar in full screen: a small tab at the top center that opens into the session controls
+/// while the pointer is over it, so the remote desktop keeps the whole screen.
+struct FloatingBar: View {
+    static let space = "session"
+    let session: Session
+    var displayID: UInt32?
+    let chrome: SessionChrome
+    @State private var expanded = false
+    @State private var collapse: DispatchWorkItem?
+
+    var body: some View {
+        let controls = SessionControls(session: session, displayID: displayID)
+        VStack(spacing: 0) {
+            if expanded {
+                HStack(spacing: 10) {
+                    if controls.showsDisplays { controls.displays }
+                    controls.scaling.fixedSize()
+                    controls.viewOnly
+                    controls.sendKeys
+                    controls.stats
+                    controls.screenshot
+                    Divider().frame(height: 18)
+                    Button(action: chrome.exitFullScreen) {
+                        Label("Exit Full Screen", systemImage: "arrow.down.right.and.arrow.up.left.rectangle")
+                    }
+                    .help("Exit full screen (⌃⌘F)")
                 }
-                .help("Choose which remote display to show")
+                .labelStyle(.iconOnly)
+                .toggleStyle(.button)
+                .menuIndicator(.hidden)
+                .buttonStyle(.borderless)
+                .controlSize(.large)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            } else {
+                // A wide, short hot zone around a small visible tab.
+                Capsule()
+                    .fill(.white.opacity(0.55))
+                    .stroke(.black.opacity(0.35), lineWidth: 0.5)
+                    .frame(width: 48, height: 5)
+                    .padding(.top, 3)
+                    .frame(width: 160, height: 10, alignment: .top)
+                    .contentShape(Rectangle())
+                    .onTapGesture { setExpanded(true) }
             }
         }
-        ToolbarItem(placement: .primaryAction) {
-            Picker("Scaling", selection: $session.scaling) {
-                ForEach(ScalingMode.allCases) { mode in
-                    Label(mode.label, systemImage: mode.symbol).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .help("Scale to fit, fill the window's width or height, show actual pixels, or resize the remote desktop to match the window")
+        .onHover { inside in
+            collapse?.cancel()
+            if inside { setExpanded(true) } else { scheduleCollapse() }
         }
-        ToolbarItem(placement: .primaryAction) {
-            Toggle(isOn: $session.viewOnly) {
-                Label("View Only", systemImage: session.viewOnly ? "eye" : "computermouse")
-            }
-            .help(session.viewOnly ? "View only: input is not sent" : "Controlling: click to switch to view only")
+        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(Self.space)) }) { rect in
+            session.remoteView(for: displayID)?.overlayRect = rect
         }
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                SendKeysMenu(session: session)
-            } label: {
-                Label("Send Keys", systemImage: "keyboard")
+        .onDisappear { session.remoteView(for: displayID)?.overlayRect = nil }
+    }
+
+    /// Collapses shortly after the pointer leaves, but not while one of the bar's menus is open or the pointer is
+    /// back over the bar (hover events don't arrive while a menu tracks).
+    private func scheduleCollapse() {
+        let work = DispatchWorkItem {
+            guard let view = session.remoteView(for: displayID), let window = view.window else { return setExpanded(false) }
+            let p = view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            if RunLoop.current.currentMode == .eventTracking || view.overlayRect?.contains(p) == true {
+                scheduleCollapse()
+            } else {
+                setExpanded(false)
             }
-            .help("Send special keys and clipboard text")
-            .disabled(session.phase != .connected)
         }
-        ToolbarItem(placement: .primaryAction) {
-            Toggle(isOn: $session.showStats) {
-                Label("Connection Stats", systemImage: "gauge.with.dots.needle.33percent")
-            }
-            .help("Show frame rate, bandwidth, latency and encoding (⌃⌘I)")
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Button("Save Screenshot to Desktop") { session.saveScreenshot() }
-                Button("Copy Screenshot") { session.copyScreenshot() }
-            } label: {
-                Label("Screenshot", systemImage: "camera")
-            }
-            .disabled(session.phase != .connected)
-        }
+        collapse = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
+    }
+
+    private func setExpanded(_ value: Bool) {
+        withAnimation(.snappy(duration: 0.2)) { expanded = value }
     }
 }
 
