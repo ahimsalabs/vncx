@@ -287,6 +287,16 @@ struct SettingsView: View {
                 Toggle("Send ⌘ shortcuts to the remote computer", isOn: $prefs.sendCommandShortcuts)
                 Text("⌘Q, ⌘H and all ⌃⌘ shortcuts stay with vncx.")
                     .font(.caption).foregroundStyle(.secondary)
+                Picker("Capture system shortcuts", selection: $prefs.keyboardCapture) {
+                    ForEach(KeyboardCapturePolicy.allCases) { Text($0.label).tag($0) }
+                }
+                Text("Sends ⌘Tab, ⌘Space, Mission Control and other system shortcuts to the remote computer. Requires Accessibility permission (System Settings › Privacy & Security › Accessibility).")
+                    .font(.caption).foregroundStyle(.secondary)
+                if prefs.keyboardCapture != .never && !KeyboardCapture.shared.isTrusted {
+                    Button("Open Accessibility Settings…") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                    }
+                }
                 Toggle("Share clipboard with the remote computer", isOn: $prefs.syncClipboard)
             }
             .formStyle(.grouped)
@@ -306,6 +316,6 @@ struct SettingsView: View {
             .formStyle(.grouped)
             .tabItem { Label("Display", systemImage: "display") }
         }
-        .frame(width: 480, height: 300)
+        .frame(width: 520, height: 400)
     }
 }

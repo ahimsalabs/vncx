@@ -101,14 +101,20 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) {
         SessionManager.shared.activeSession = session
         session.syncClipboardToRemote()
+        KeyboardCapture.shared.update()
     }
 
     func windowDidResignKey(_ notification: Notification) {
         if SessionManager.shared.activeSession === session { SessionManager.shared.activeSession = nil }
+        DispatchQueue.main.async { KeyboardCapture.shared.update() }
     }
 
-    func windowDidEnterFullScreen(_ notification: Notification) { session.view?.remoteResizeIfNeeded() }
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        session.view?.remoteResizeIfNeeded()
+        KeyboardCapture.shared.update()
+    }
     func windowDidExitFullScreen(_ notification: Notification) {
+        KeyboardCapture.shared.update()
         applyScaling(resizeWindow: false)
         session.view?.remoteResizeIfNeeded()
     }
