@@ -7,9 +7,14 @@ import SwiftUI
 /// viewer needs precise control over content size, aspect ratio, and full screen behavior.
 final class SessionWindowController: NSWindowController, NSWindowDelegate {
     let session: Session
+    /// nil for the session's main window; a remote screen id for a per-display window.
+    let displayID: UInt32?
+    var isAuxiliary: Bool { displayID != nil }
+    private var remoteView: RemoteView? { session.remoteView(for: displayID) }
 
-    init(session: Session) {
+    init(session: Session, displayID: UInt32? = nil) {
         self.session = session
+        self.displayID = displayID
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 600),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
@@ -21,7 +26,7 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
         window.backgroundColor = .black
         window.minSize = NSSize(width: 320, height: 200)
 
-        let host = NSHostingController(rootView: SessionView(session: session))
+        let host = NSHostingController(rootView: SessionView(session: session, displayID: displayID))
         host.sizingOptions = []
         host.sceneBridgingOptions = [.toolbars, .title]
         window.contentViewController = host
@@ -29,7 +34,13 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
         window.center()
         super.init(window: window)
         window.delegate = self
-        session.windowController = self
+        if let displayID {
+            session.auxControllers[displayID] = self
+            window.tabbingMode = .disallowed
+            DispatchQueue.main.async { [weak self] in self?.resizeToIdeal(); self?.applyScaling(resizeWindow: false) }
+        } else {
+            session.windowController = self
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -48,10 +59,10 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func applyScaling(resizeWindow: Bool) {
-        guard let window, let fb = session.framebuffer else { return }
+        guard let window, session.framebuffer != nil, let region = remoteView?.region.size, region.width > 0 else { return }
         switch session.scaling {
         case .fit:
-            window.contentAspectRatio = NSSize(width: fb.width, height: fb.height)
+            window.contentAspectRatio = region
             if resizeWindow && !isFullScreen { fitWindowToAspect() }
         case .actual, .remoteResize:
             window.contentResizeIncrements = NSSize(width: 1, height: 1) // clears the aspect ratio constraint
@@ -60,15 +71,15 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func resizeToIdeal() {
-        guard let window, let fb = session.framebuffer, let view = session.view, !isFullScreen else { return }
+        guard let window, session.framebuffer != nil, let view = remoteView, !isFullScreen else { return }
         let size = view.idealContentSize(for: view.region.size, on: window.screen ?? NSScreen.main)
         setContentSize(size)
     }
 
     private func fitWindowToAspect() {
-        guard let window, let fb = session.framebuffer else { return }
+        guard let window, let region = remoteView?.region.size, region.height > 0 else { return }
         let current = window.contentRect(forFrameRect: window.frame).size
-        let aspect = CGFloat(fb.width) / CGFloat(fb.height)
+        let aspect = region.width / region.height
         var size = NSSize(width: current.width, height: (current.width / aspect).rounded())
         if let visible = (window.screen ?? NSScreen.main)?.visibleFrame, size.height > visible.height - 60 {
             size.height = visible.height - 60
@@ -94,6 +105,12 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
     // MARK: NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
+        if let displayID {
+            session.auxiliaryClosed(displayID)
+            SessionManager.shared.closedAuxiliary(self)
+            return
+        }
+        session.auxControllers.values.forEach { $0.close() }
         session.disconnect()
         SessionManager.shared.closed(self)
     }
@@ -110,13 +127,13 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowDidEnterFullScreen(_ notification: Notification) {
-        session.view?.remoteResizeIfNeeded()
+        remoteView?.remoteResizeIfNeeded()
         KeyboardCapture.shared.update()
     }
     func windowDidExitFullScreen(_ notification: Notification) {
         KeyboardCapture.shared.update()
         applyScaling(resizeWindow: false)
-        session.view?.remoteResizeIfNeeded()
+        remoteView?.remoteResizeIfNeeded()
     }
 }
 
@@ -163,9 +180,14 @@ final class SessionManager {
         let session = Session(config: config)
         let controller = SessionWindowController(session: session)
         controllers[session.id] = controller
-        controller.showWindow(nil)
-        controller.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate()
+        if Session.isEphemeral {
+            // Development runs must never steal focus (keystrokes meant for another app would reach the remote).
+            controller.window?.orderFrontRegardless()
+        } else {
+            controller.showWindow(nil)
+            controller.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+        }
         session.connect()
     }
 
@@ -184,12 +206,29 @@ final class SessionManager {
         open(config)
     }
 
+    @ObservationIgnored private var auxiliary: [SessionWindowController] = []
+
+    /// Opens a window showing one display of an existing session.
+    func openAuxiliary(session: Session, display: UInt32) -> SessionWindowController {
+        let c = SessionWindowController(session: session, displayID: display)
+        auxiliary.append(c)
+        if let main = session.windowController?.window, let w = c.window {
+            w.setFrameTopLeftPoint(NSPoint(x: main.frame.maxX + 20, y: main.frame.maxY))
+        }
+        return c
+    }
+
+    func closedAuxiliary(_ controller: SessionWindowController) {
+        auxiliary.removeAll { $0 === controller }
+    }
+
     func closed(_ controller: SessionWindowController) {
         controllers[controller.session.id] = nil
         if activeSession === controller.session { activeSession = nil }
     }
 
     var hasSessions: Bool { !controllers.isEmpty }
+    var anySession: Session? { controllers.values.first?.session }
 
     func disconnectAll() { controllers.values.forEach { $0.session.disconnect() } }
 }

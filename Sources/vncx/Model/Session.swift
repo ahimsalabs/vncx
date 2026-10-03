@@ -39,25 +39,120 @@ final class Session: Identifiable {
 
     var scaling: ScalingMode {
         didSet {
-            view?.scaling = scaling
+            allViews.forEach { $0.scaling = scaling }
             config.scaling = scaling
             persistConfig()
             windowController?.applyScaling(resizeWindow: true)
         }
     }
     var viewOnly: Bool {
-        didSet { view?.viewOnly = viewOnly; config.viewOnly = viewOnly; persistConfig() }
+        didSet { allViews.forEach { $0.viewOnly = viewOnly }; config.viewOnly = viewOnly; persistConfig() }
     }
     /// Local cursor used when the server doesn't send cursor shapes.
     var localCursor: LocalCursorMode {
-        didSet { view?.fallbackCursor = localCursor; config.localCursor = localCursor; persistConfig() }
+        didSet { allViews.forEach { $0.fallbackCursor = localCursor }; config.localCursor = localCursor; persistConfig() }
     }
     var remoteResizeUsesRetina: Bool { config.remoteResizeRetina }
 
     @ObservationIgnored private(set) var client: RFBClient?
     @ObservationIgnored private(set) var framebuffer: Framebuffer?
     @ObservationIgnored private var cursor: RemoteCursor?
+    @ObservationIgnored private var hasCursorInfo = false
+    /// The main window's view.
     @ObservationIgnored weak var view: RemoteView?
+    /// Views in per-display windows, keyed by remote screen id.
+    @ObservationIgnored private var auxViews: [UInt32: WeakRemoteView] = [:]
+    @ObservationIgnored var auxControllers: [UInt32: SessionWindowController] = [:]
+
+    var allViews: [RemoteView] { ([view] + auxViews.values.map(\.view)).compactMap { $0 } }
+
+    func register(_ v: RemoteView, display: UInt32?) {
+        if let display { auxViews[display] = WeakRemoteView(view: v) } else { view = v }
+        v.framebuffer = framebuffer
+        if hasCursorInfo { v.setRemoteCursor(cursor) }
+    }
+
+    func remoteView(for display: UInt32?) -> RemoteView? { display.flatMap { auxViews[$0]?.view } ?? (display == nil ? view : nil) }
+
+    // MARK: Displays
+
+    /// Remote monitors, ordered left to right (then top to bottom), numbered from 1.
+    private(set) var displays: [RemoteDisplay] = []
+    /// Which display the main window shows; nil shows the whole desktop.
+    var selectedDisplay: UInt32? {
+        didSet {
+            guard selectedDisplay != oldValue else { return }
+            view?.crop = cropRect(for: selectedDisplay)
+            if let d = displays.first(where: { $0.id == selectedDisplay }) { config.preferredDisplay = d.key } else { config.preferredDisplay = nil }
+            persistConfig()
+            windowController?.applyScaling(resizeWindow: true)
+        }
+    }
+
+    func cropRect(for display: UInt32?) -> CGRect? {
+        guard let display, displays.count > 1 else { return nil }
+        return displays.first { $0.id == display }?.rect
+    }
+
+    func display(_ id: UInt32?) -> RemoteDisplay? { displays.first { $0.id == id } }
+
+    private func updateDisplays(_ layouts: [ScreenLayout]) {
+        let sorted = layouts.sorted { ($0.x, $0.y) < ($1.x, $1.y) }
+        let list = sorted.enumerated().map { i, l in
+            RemoteDisplay(id: l.id, number: i + 1, rect: CGRect(x: Int(l.x), y: Int(l.y), width: Int(l.w), height: Int(l.h)))
+        }
+        guard list != displays else { return }
+        displays = list
+        if list.count <= 1 {
+            if selectedDisplay != nil { selectedDisplay = nil }
+            auxControllers.values.forEach { $0.close() }
+        } else if let current = selectedDisplay, list.contains(where: { $0.id == current }) {
+            view?.crop = cropRect(for: current) // geometry may have changed
+        } else if let pref = config.preferredDisplay {
+            // Restore the remembered display: same number and size, else same size, else same number.
+            let parts = pref.split(separator: ":")
+            let number = Int(parts.first ?? "") ?? 0, size = parts.count > 1 ? String(parts[1]) : ""
+            let match = list.first { $0.number == number && $0.sizeText == size } ?? list.first { $0.sizeText == size }
+                ?? list.first { $0.number == number }
+            selectedDisplay = match?.id
+        }
+        for (id, c) in auxControllers where !list.contains(where: { $0.id == id }) { c.close() }
+        for v in auxViews { v.value.view?.crop = cropRect(for: v.key) }
+    }
+
+    /// Opens every display other than the main window's in its own window. With `fullScreen`, each window
+    /// is moved to a different Mac display (left to right) and made full screen.
+    func openAllDisplays(fullScreen: Bool) {
+        guard displays.count > 1 else { return }
+        if selectedDisplay == nil { selectedDisplay = displays[0].id }
+        var windows: [NSWindow] = [windowController?.window].compactMap { $0 }
+        for d in displays where d.id != selectedDisplay {
+            let c = auxControllers[d.id] ?? SessionManager.shared.openAuxiliary(session: self, display: d.id)
+            if Self.isEphemeral { c.window?.orderFrontRegardless() } else { c.showWindow(nil) }
+            if let w = c.window { windows.append(w) }
+        }
+        guard fullScreen else { return }
+        let screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
+        for (i, w) in windows.enumerated() {
+            let screen = screens[i % screens.count]
+            if !w.styleMask.contains(.fullScreen) {
+                let f = screen.visibleFrame
+                w.setFrame(NSRect(x: f.minX + 40, y: f.minY + 40, width: min(w.frame.width, f.width - 80),
+                                  height: min(w.frame.height, f.height - 80)), display: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3 * Double(i)) { w.toggleFullScreen(nil) }
+            }
+        }
+    }
+
+    func showAllDisplaysInOneWindow() {
+        auxControllers.values.forEach { $0.close() }
+        selectedDisplay = nil
+    }
+
+    func auxiliaryClosed(_ display: UInt32) {
+        auxViews[display] = nil
+        auxControllers[display] = nil
+    }
     @ObservationIgnored weak var windowController: SessionWindowController?
     @ObservationIgnored private var credentialReply: ((Credentials?) -> Void)?
     @ObservationIgnored private var lastAuthFailed = false
@@ -164,7 +259,7 @@ final class Session: Identifiable {
                 if self.redrawGate.arm() {
                     DispatchQueue.main.async {
                         self.redrawGate.disarm()
-                        self.view?.needsDisplay = true
+                        for v in self.allViews { v.needsDisplay = true }
                     }
                 }
                 return
@@ -280,10 +375,13 @@ final class Session: Identifiable {
             setFramebuffer(fb)
             windowController?.remoteResized()
         case .updated:
-            view?.needsDisplay = true
+            allViews.forEach { $0.needsDisplay = true }
         case .cursor(let c):
             cursor = c
-            view?.setRemoteCursor(c)
+            hasCursorInfo = true
+            allViews.forEach { $0.setRemoteCursor(c) }
+        case .screens(let layouts):
+            updateDisplays(layouts)
         case .bell:
             NSSound.beep()
         case .clipboard(let text):
@@ -350,8 +448,7 @@ final class Session: Identifiable {
     private func setFramebuffer(_ fb: Framebuffer) {
         framebuffer = fb
         framebufferSize = CGSize(width: fb.width, height: fb.height)
-        view?.framebuffer = fb
-        view?.needsDisplay = true
+        for v in allViews { v.framebuffer = fb; v.needsDisplay = true }
     }
 
     /// Records the connection in history and saves credentials the user asked us to remember.

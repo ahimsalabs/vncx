@@ -17,6 +17,27 @@ enum DebugDump {
         s.setEventHandler { MainActor.assumeIsolated { dump(to: URL(fileURLWithPath: dir)) } }
         s.resume()
         source = s
+        // `kill -USR2` runs the action written in <dir>/action: "select:N" (display number, 0 = all) or "openall".
+        signal(SIGUSR2, SIG_IGN)
+        let a = DispatchSource.makeSignalSource(signal: SIGUSR2, queue: .main)
+        a.setEventHandler { MainActor.assumeIsolated { runAction(URL(fileURLWithPath: dir)) } }
+        a.resume()
+        actionSource = a
+    }
+
+    private static var actionSource: DispatchSourceSignal?
+
+    @MainActor static func runAction(_ dir: URL) {
+        guard let action = try? String(contentsOf: dir.appendingPathComponent("action"), encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              let session = SessionManager.shared.activeSession ?? SessionManager.shared.anySession else { return }
+        if action.hasPrefix("select:"), let n = Int(action.dropFirst(7)) {
+            session.selectedDisplay = session.displays.first { $0.number == n }?.id
+        } else if action == "openall" {
+            session.openAllDisplays(fullScreen: false)
+        } else if action == "onewindow" {
+            session.showAllDisplaysInOneWindow()
+        }
     }
 
     @MainActor static func dump(to dir: URL) {
@@ -35,6 +56,7 @@ enum DebugDump {
                 let l = remote.currentLayout()
                 report += "  remote: fb=\(remote.framebuffer.map { "\($0.width)x\($0.height)" } ?? "nil") bounds=\(remote.bounds.size) drawable=\(remote.drawableSize) scaling=\(remote.scaling) layout.dst=\(l.dst) scale=\(l.scale) src=\(l.srcOrigin)\n"
                 if let s = remote.session {
+                    report += "  displays: \(s.displays.map(\.label)) selected=\(s.display(s.selectedDisplay)?.number ?? 0) crop=\(String(describing: remote.crop))\n"
                     let r = ImageRenderer(content: StatsOverlay(stats: s.liveStats, size: s.framebufferSize, auto: s.config.quality == .auto).padding(8).background(Color.gray))
                     r.scale = 2
                     if let img = r.cgImage { write(img, dir.appendingPathComponent("stats-\(i).png")) }

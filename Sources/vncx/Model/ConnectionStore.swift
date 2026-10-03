@@ -33,6 +33,8 @@ struct SavedConnection: Codable, Identifiable, Hashable {
     var localCursor: LocalCursorMode = .arrow
     var ssh = SSHSettings()
     var wake = WakeSettings()
+    /// The remote display last chosen for the main window ("number:WxH"), for multi-monitor servers.
+    var preferredDisplay: String?
 
     /// The SSH destination to use (defaults to the VNC host).
     var sshDestination: String {
@@ -44,7 +46,7 @@ struct SavedConnection: Codable, Identifiable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, host, port, username, bonjourName, quality, scaling, viewOnly, remoteResizeRetina
-        case lastConnected, lastResolution, localCursor, ssh, wake
+        case lastConnected, lastResolution, localCursor, ssh, wake, preferredDisplay
     }
 
     /// Tolerant decoding: any missing or unreadable key keeps its default, so adding settings never
@@ -67,6 +69,7 @@ struct SavedConnection: Codable, Identifiable, Hashable {
         localCursor = get(.localCursor, localCursor)
         ssh = get(.ssh, ssh)
         wake = get(.wake, wake)
+        preferredDisplay = get(.preferredDisplay, preferredDisplay)
     }
 
     var title: String { name.isEmpty ? (bonjourName ?? Address(host: host, port: port).display) : name }
@@ -151,4 +154,19 @@ final class ConnectionStore {
         enc.dateEncodingStrategy = .iso8601
         if let data = try? enc.encode(connections) { try? data.write(to: fileURL, options: .atomic) }
     }
+}
+
+/// One monitor of a multi-screen remote desktop.
+struct RemoteDisplay: Identifiable, Equatable {
+    let id: UInt32
+    let number: Int
+    let rect: CGRect
+    var sizeText: String { "\(Int(rect.width))x\(Int(rect.height))" }
+    var key: String { "\(number):\(sizeText)" }
+    var label: String { "Display \(number) (\(Int(rect.width))×\(Int(rect.height)))" }
+}
+
+final class WeakRemoteView {
+    weak var view: RemoteView?
+    init(view: RemoteView) { self.view = view }
 }

@@ -4,20 +4,25 @@ import AppKit
 
 struct RemoteViewRepresentable: NSViewRepresentable {
     let session: Session
+    var displayID: UInt32?
+
+    /// The crop for this view: its own display for a per-display window, the selected display for the main one.
+    private var crop: CGRect? { session.cropRect(for: displayID ?? session.selectedDisplay) }
 
     func makeNSView(context: Context) -> RemoteView {
         let view = RemoteView(session: session)
-        session.view = view
+        view.crop = crop
+        session.register(view, display: displayID)
         view.scaling = session.scaling
         view.viewOnly = session.viewOnly
         view.smoothScaling = Preferences.shared.smoothScaling
         view.fallbackCursor = session.localCursor
-        view.framebuffer = session.framebuffer
-        view.onZoomChange = { [weak session] z in session?.zoom = z }
+        if displayID == nil { view.onZoomChange = { [weak session] z in session?.zoom = z } }
         return view
     }
 
     func updateNSView(_ view: RemoteView, context: Context) {
+        view.crop = crop
         view.scaling = session.scaling
         view.fallbackCursor = session.localCursor
         view.viewOnly = session.viewOnly
@@ -27,10 +32,16 @@ struct RemoteViewRepresentable: NSViewRepresentable {
 
 struct SessionView: View {
     @Bindable var session: Session
+    var displayID: UInt32?
+
+    private var windowTitle: String {
+        guard let d = session.display(displayID) else { return session.title }
+        return "\(session.title) — Display \(d.number)"
+    }
 
     var body: some View {
         ZStack {
-            RemoteViewRepresentable(session: session)
+            RemoteViewRepresentable(session: session, displayID: displayID)
                 .opacity(session.phase == .connected ? 1 : 0.35)
             overlay
             if session.showStats && session.phase == .connected {
@@ -42,7 +53,7 @@ struct SessionView: View {
         }
         .background(Color.black)
         .ignoresSafeArea(.container, edges: .bottom)
-        .navigationTitle(session.title)
+        .navigationTitle(windowTitle)
         .navigationSubtitle(session.subtitle)
         .toolbar { toolbar }
         .sheet(item: $session.credentialPrompt) { prompt in
@@ -109,6 +120,16 @@ struct SessionView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        if displayID == nil && session.displays.count > 1 {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    DisplayMenu(session: session)
+                } label: {
+                    Label("Displays", systemImage: "rectangle.on.rectangle")
+                }
+                .help("Choose which remote display to show")
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             Picker("Scaling", selection: $session.scaling) {
                 ForEach(ScalingMode.allCases) { mode in
@@ -261,5 +282,21 @@ struct StatsOverlay: View {
             Text(k).foregroundStyle(.secondary)
             Text(v)
         }
+    }
+}
+
+struct DisplayMenu: View {
+    let session: Session
+    var body: some View {
+        Picker("Show", selection: Binding(get: { session.selectedDisplay }, set: { session.selectedDisplay = $0 })) {
+            Text("All Displays").tag(UInt32?.none)
+            ForEach(session.displays) { d in Text(d.label).tag(Optional(d.id)) }
+        }
+        .pickerStyle(.inline)
+        Divider()
+        Button("Open Each Display in Its Own Window") { session.openAllDisplays(fullScreen: false) }
+        Button("Full Screen on All My Displays") { session.openAllDisplays(fullScreen: true) }
+            .disabled(NSScreen.screens.count < 2)
+        Button("Show All Displays in One Window") { session.showAllDisplaysInOneWindow() }
     }
 }

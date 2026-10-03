@@ -111,6 +111,8 @@ package enum RFBEvent: @unchecked Sendable {
     case bell
     case clipboard(String)
     case nameChanged(String)
+    /// The server's screen layout (ExtendedDesktopSize), e.g. one entry per monitor.
+    case screens([ScreenLayout])
     case disconnected(Error?)
 }
 
@@ -486,7 +488,7 @@ package final class RFBClient: @unchecked Sendable {
         }
         lock.withLock { _supportsResize = true; if status == 0 { screens = list } }
         traceScreens?(reason, status, list)
-        if status == 0 { resize(w, h) }
+        if status == 0 { resize(w, h); onEvent(.screens(list)) }
     }
 
     private func cursorPseudo(x: Int, y: Int, w: Int, h: Int) throws {

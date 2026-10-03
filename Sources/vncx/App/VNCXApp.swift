@@ -11,6 +11,11 @@ final class AppState {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Development runs stay in the background so they never take keyboard focus from the user.
+        if Session.isEphemeral { NSApp.setActivationPolicy(.accessory) }
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme?.lowercased() == "vnc" {
             _ = SessionManager.shared.open(address: url.absoluteString)
@@ -110,6 +115,9 @@ struct AppCommands: Commands {
             Button("Send Clipboard to Remote") { s?.syncClipboardToRemote(force: true) }
                 .disabled(!connected)
             Divider()
+            if let s, s.displays.count > 1 {
+                Menu("Displays") { DisplayMenu(session: s) }
+            }
             Toggle("Show Connection Stats", isOn: Binding(get: { s?.showStats ?? false }, set: { s?.showStats = $0 }))
                 .keyboardShortcut("i", modifiers: [.control, .command])
                 .disabled(s == nil)

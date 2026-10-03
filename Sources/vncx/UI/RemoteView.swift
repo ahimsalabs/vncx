@@ -209,7 +209,9 @@ final class RemoteView: MTKView {
 
     private var lastRequestedRemoteSize: CGSize?
     func remoteResizeIfNeeded() {
-        guard scaling == .remoteResize, let session, bounds.width > 50, bounds.height > 50 else { return }
+        // Resizing a multi-monitor remote would collapse its layout into one screen.
+        guard scaling == .remoteResize, let session, session.displays.count <= 1, crop == nil,
+              bounds.width > 50, bounds.height > 50 else { return }
         let scale: CGFloat = session.remoteResizeUsesRetina ? backingScale : 1
         let size = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
         guard size != lastRequestedRemoteSize else { return }
