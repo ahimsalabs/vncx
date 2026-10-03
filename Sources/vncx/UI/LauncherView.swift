@@ -366,9 +366,10 @@ struct SettingsView: View {
                     }
                 }
                 Toggle("Share clipboard with the remote computer", isOn: $prefs.syncClipboard)
+                Toggle("Show vncx in the menu bar", isOn: $prefs.showMenuBarItem)
             }
             .formStyle(.grouped)
-            .tabItem { Label("Keyboard", systemImage: "keyboard") }
+            .tabItem { Label("General", systemImage: "gearshape") }
 
             Form {
                 Toggle("Smooth scaling", isOn: $prefs.smoothScaling)

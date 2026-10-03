@@ -17,6 +17,9 @@ final class Preferences {
     var keyboardCapture: KeyboardCapturePolicy {
         didSet { defaults.set(keyboardCapture.rawValue, forKey: "keyboardCapture"); KeyboardCapture.shared.update() }
     }
+    var showMenuBarItem: Bool {
+        didSet { defaults.set(showMenuBarItem, forKey: "showMenuBarItem") }
+    }
     var syncClipboard: Bool {
         didSet { defaults.set(syncClipboard, forKey: "syncClipboard") }
     }
@@ -34,6 +37,7 @@ final class Preferences {
         commandKey = CommandKeyMapping(rawValue: defaults.string(forKey: "commandKey") ?? "") ?? .superKey
         sendCommandShortcuts = defaults.object(forKey: "sendCommandShortcuts") as? Bool ?? true
         keyboardCapture = KeyboardCapturePolicy(rawValue: defaults.string(forKey: "keyboardCapture") ?? "") ?? .fullScreen
+        showMenuBarItem = defaults.object(forKey: "showMenuBarItem") as? Bool ?? true
         syncClipboard = defaults.object(forKey: "syncClipboard") as? Bool ?? true
         smoothScaling = defaults.object(forKey: "smoothScaling") as? Bool ?? true
         defaultQuality = Quality(rawValue: defaults.string(forKey: "defaultQuality") ?? "") ?? .auto

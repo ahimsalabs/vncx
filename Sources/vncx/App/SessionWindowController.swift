@@ -229,6 +229,15 @@ final class SessionManager {
 
     var hasSessions: Bool { !controllers.isEmpty }
     var anySession: Session? { controllers.values.first?.session }
+    var openSessions: [Session] {
+        controllers.values.map(\.session).sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    func focus(_ session: Session) {
+        guard let w = session.windowController?.window else { return }
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+    }
 
     func disconnectAll() { controllers.values.forEach { $0.session.disconnect() } }
 }
