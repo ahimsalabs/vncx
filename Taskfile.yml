@@ -3,7 +3,11 @@ version: '3'
 vars:
   APP: vncx
   BUILD_DIR: build
-  BUNDLE: '{{.BUILD_DIR}}/{{.APP}}.app'
+  # "dev" (default for local builds): bundle id net.ahimsalabs.vncx.dev, name "vncx Dev", orange DEV icon, and its own
+  # preferences, saved computers and Keychain items. "release" (CI): the real identity.
+  VARIANT: '{{.VARIANT | default "dev"}}'
+  BUNDLE: '{{.BUILD_DIR}}/{{if eq .VARIANT "release"}}{{.APP}}{{else}}{{.APP}}-dev{{end}}.app'
+  ICON: '{{.BUILD_DIR}}/AppIcon-{{.VARIANT}}.icns'
   # "-" is ad-hoc; CI passes the self-signed cert's SHA-1 for a stable identity.
   SIGN_IDENTITY: '{{.SIGN_IDENTITY | default "-"}}'
 
@@ -29,6 +33,14 @@ tasks:
       - mkdir -p {{.BUNDLE}}/Contents/MacOS {{.BUNDLE}}/Contents/Resources
       - cp "$(swift build -c release --show-bin-path)/{{.APP}}" {{.BUNDLE}}/Contents/MacOS/{{.APP}}
       - cp Resources/Info.plist {{.BUNDLE}}/Contents/Info.plist
+      - |
+        if [ "{{.VARIANT}}" != "release" ]; then
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleIdentifier net.ahimsalabs.vncx.dev" \
+            -c "Set :CFBundleName vncx Dev" \
+            -c "Set :CFBundleDisplayName vncx Dev" \
+            {{.BUNDLE}}/Contents/Info.plist
+        fi
       # Stamp the build: commit (with -dirty for uncommitted changes), build date, and an increasing build number.
       - |
         COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -38,7 +50,7 @@ tasks:
           -c "Add :VNCXGitCommit string $COMMIT" \
           -c "Add :VNCXBuildDate string $(date -u +%Y-%m-%dT%H:%MZ)" \
           {{.BUNDLE}}/Contents/Info.plist
-      - cp {{.BUILD_DIR}}/AppIcon.icns {{.BUNDLE}}/Contents/Resources/AppIcon.icns
+      - cp {{.ICON}} {{.BUNDLE}}/Contents/Resources/AppIcon.icns
       - cp LICENSE NOTICE {{.BUNDLE}}/Contents/Resources/
       - codesign --force --sign "{{.SIGN_IDENTITY}}" --entitlements Resources/vncx.entitlements {{.BUNDLE}}
       - echo "Built {{.BUNDLE}}"
@@ -46,11 +58,11 @@ tasks:
   icon:
     desc: Render the app icon into an .icns
     sources: [Resources/icon.swift]
-    generates: ['{{.BUILD_DIR}}/AppIcon.icns']
+    generates: ['{{.ICON}}']
     cmds:
-      - mkdir -p {{.BUILD_DIR}}/AppIcon.iconset
-      - swift Resources/icon.swift {{.BUILD_DIR}}/AppIcon.iconset
-      - iconutil -c icns {{.BUILD_DIR}}/AppIcon.iconset -o {{.BUILD_DIR}}/AppIcon.icns
+      - mkdir -p {{.BUILD_DIR}}/AppIcon-{{.VARIANT}}.iconset
+      - swift Resources/icon.swift {{.BUILD_DIR}}/AppIcon-{{.VARIANT}}.iconset {{.VARIANT}}
+      - iconutil -c icns {{.BUILD_DIR}}/AppIcon-{{.VARIANT}}.iconset -o {{.ICON}}
 
   run:
     desc: Build the bundle and launch it
@@ -63,8 +75,9 @@ tasks:
     deps: [bundle]
     cmds:
       - mkdir -p ~/Applications
-      - rm -rf ~/Applications/{{.APP}}.app
-      - cp -R {{.BUNDLE}} ~/Applications/{{.APP}}.app
+      # Installs next to (never over) the other variant: vncx-dev.app or vncx.app.
+      - rm -rf ~/Applications/$(basename {{.BUNDLE}})
+      - cp -R {{.BUNDLE}} ~/Applications/
 
   test:
     desc: Run unit tests

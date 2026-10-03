@@ -75,7 +75,7 @@ struct LauncherView: View {
             .padding(24)
         }
         .frame(minWidth: 560, minHeight: 420)
-        .navigationTitle("vncx")
+        .navigationTitle(AppIdentity.name)
         .searchable(text: $search, placement: .toolbar, prompt: "Search")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

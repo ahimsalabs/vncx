@@ -18,7 +18,7 @@ enum BuildInfo {
 
     /// One line for bug reports: "vncx 0.1.0 (21) e98a754, built 2026-10-03T18:40Z".
     static var summary: String {
-        var s = "vncx \(version) (\(build))"
+        var s = "\(AppIdentity.name) \(version) (\(build))"
         if let shortCommit { s += " \(shortCommit)" }
         if let buildDate { s += ", built \(buildDate)" }
         return s

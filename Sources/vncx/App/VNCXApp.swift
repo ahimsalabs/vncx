@@ -61,7 +61,7 @@ struct VNCXApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Window("vncx", id: "launcher") {
+        Window(AppIdentity.name, id: "launcher") {
             LauncherView()
         }
         .defaultSize(width: 760, height: 540)
@@ -78,7 +78,7 @@ struct AppCommands: Commands {
     var body: some Commands {
         let _ = { AppState.shared.openLauncher = { [openWindow] in openWindow(id: "launcher") } }()
         CommandGroup(replacing: .appInfo) {
-            Button("About vncx") { BuildInfo.showAboutPanel() }
+            Button("About \(AppIdentity.name)") { BuildInfo.showAboutPanel() }
             Button("Copy Version Info") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(BuildInfo.summary, forType: .string)

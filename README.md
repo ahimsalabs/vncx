@@ -28,7 +28,7 @@ vncx needs macOS 15 or later.
 
 Updates keep their Keychain and Accessibility permissions, because every build is signed with the same certificate.
 
-To build from source instead, see [Development](docs/development.md).
+To build from source instead, see [Development](docs/development.md). Local builds are called **vncx Dev**, with an orange icon. They keep their own settings and saved computers, so they can run beside the release.
 
 ## Connecting
 

@@ -111,7 +111,7 @@ final class ConnectionStore {
 
     static let directory: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent("vncx", isDirectory: true)
+        let dir = base.appendingPathComponent(AppIdentity.dataFolderName, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir.appendingPathComponent("Thumbnails"), withIntermediateDirectories: true)
         return dir
     }()

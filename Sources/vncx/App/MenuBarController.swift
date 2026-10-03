@@ -13,10 +13,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         if Preferences.shared.showMenuBarItem {
             guard item == nil else { return }
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-            let image = NSImage(systemSymbolName: "display", accessibilityDescription: "vncx")
+            let image = NSImage(systemSymbolName: AppIdentity.isDev ? "hammer" : "display", accessibilityDescription: AppIdentity.name)
             image?.isTemplate = true
             item.button?.image = image
-            item.button?.toolTip = "vncx"
+            item.button?.toolTip = AppIdentity.name
             let menu = NSMenu()
             menu.delegate = self
             item.menu = menu
@@ -67,7 +67,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         })
         menu.addItem(.separator())
-        let quit = action("Quit vncx") { NSApp.terminate(nil) }
+        let quit = action("Quit \(AppIdentity.name)") { NSApp.terminate(nil) }
         quit.keyEquivalent = "q"
         menu.addItem(quit)
     }

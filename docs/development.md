@@ -7,9 +7,9 @@ vncx is a Swift package; the Taskfile wraps it. The Xcode Command Line Tools are
 ```sh
 task build         # release build of all targets
 task check         # debug build of all targets
-task bundle        # assemble and ad-hoc sign build/vncx.app (also renders the icon)
+task bundle        # assemble and sign build/vncx-dev.app (also renders the icon)
 task run           # bundle and open
-task install       # bundle and copy to ~/Applications
+task install       # bundle and copy to ~/Applications (as vncx-dev.app, beside any release copy)
 task test          # unit tests
 task clean
 ```
@@ -18,6 +18,27 @@ The app bundle is put together by hand from the SwiftPM binary, `Resources/Info.
 
 ```sh
 task bundle SIGN_IDENTITY="<SHA-1 or name of a code-signing identity>"
+```
+
+### Dev and release variants
+
+Local builds are the **dev** variant by default. They're meant to run alongside an installed release without touching it:
+
+| | Dev (default) | Release (`VARIANT=release`, used by CI) |
+|---|---|---|
+| Bundle | `build/vncx-dev.app` | `build/vncx.app` |
+| Name | vncx Dev | vncx |
+| Bundle ID | `net.ahimsalabs.vncx.dev` | `net.ahimsalabs.vncx` |
+| Icon | Orange with a DEV badge | Dark blue |
+| Menu bar icon | Hammer | Display |
+| Preferences | Its own defaults domain | `net.ahimsalabs.vncx` |
+| Saved computers, thumbnails | `~/Library/Application Support/vncx-dev` | `~/Library/Application Support/vncx` |
+| Keychain service | `net.ahimsalabs.vncx.dev` | `net.ahimsalabs.vncx` |
+
+Because the bundle IDs differ, macOS also keeps separate Accessibility and Local Network grants for each. `AppIdentity` in `Sources/vncx/App/AppIdentity.swift` derives all of this from the bundle ID at run time. Build the release variant locally with:
+
+```sh
+task bundle VARIANT=release
 ```
 
 ## Build identity
@@ -142,7 +163,7 @@ An example ephemeral run:
 
 ```sh
 D=$(mktemp -d)
-VNCX_DEBUG_DIR=$D build/vncx.app/Contents/MacOS/vncx localhost:5902 &
+VNCX_DEBUG_DIR=$D build/vncx-dev.app/Contents/MacOS/vncx localhost:5902 &
 PID=$!
 sleep 4; echo select:2 > $D/action; kill -USR2 $PID
 sleep 1; kill -USR1 $PID; sleep 1; cat $D/state.txt

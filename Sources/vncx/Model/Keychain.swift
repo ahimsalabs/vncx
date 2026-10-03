@@ -7,7 +7,7 @@ import Security
 
 /// Stores passwords as generic Keychain items, keyed by "user@host:port" (or "host:port" for VNC passwords).
 enum Keychain {
-    private static let service = "net.ahimsalabs.vncx"
+    private static let service = AppIdentity.keychainService
 
     static func account(host: String, port: Int, username: String) -> String {
         username.isEmpty ? "\(host):\(port)" : "\(username)@\(host):\(port)"

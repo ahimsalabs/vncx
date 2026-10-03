@@ -46,7 +46,7 @@ jobs:
           echo "SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
 
       - name: Bundle
-        run: task bundle SIGN_IDENTITY="$SIGN_IDENTITY"
+        run: task bundle VARIANT=release SIGN_IDENTITY="$SIGN_IDENTITY"
 
       - name: Verify signature
         run: |
