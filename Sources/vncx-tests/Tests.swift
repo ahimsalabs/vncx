@@ -79,7 +79,7 @@ struct AuthTests {
 
 struct AddressTests {
     static let cases: [(String, String, Int, String)] = [
-        ("durandal.sheep-tailor.ts.net", "durandal.sheep-tailor.ts.net", 5900, ""),
+        ("mac.example.ts.net", "mac.example.ts.net", 5900, ""),
         ("host:1", "host", 5901, ""),
         ("host:5905", "host", 5905, ""),
         ("host::42", "host", 42, ""),

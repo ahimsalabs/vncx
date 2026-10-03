@@ -1,64 +1,55 @@
 # vncx
 
-A native, simple VNC viewer for macOS, built with SwiftUI, AppKit, and Metal.
+A native, simple VNC viewer for macOS. It's built with SwiftUI, AppKit and Metal, and it's designed for Retina displays and large remote desktops.
 
-## Features
+vncx connects to macOS Screen Sharing, WayVNC, TigerVNC, ReFrame and other RFB (VNC) servers. It renders the remote desktop pixel-exact on Retina screens, scales large desktops down cleanly, and follows Mac conventions: Keychain, full screen, tabs, the menu bar, Bonjour and drag and drop. It also handles things a VNC client usually leaves to you: SSH tunnels, starting the server on demand, Wake-on-LAN, multi-monitor remotes, and reconnecting after sleep.
 
-- **Retina-correct rendering.** The framebuffer lives in GPU-shared memory and is drawn by a Metal shader. At 1:1 and integer zoom it is pixel-exact. When downscaling large remotes (5K/6K), it box-filters instead of aliasing.
-- **Scaling and zoom.** Scale to Fit locks the window aspect ratio. Actual Size pans by following the mouse. Resize Remote changes the server's resolution to match the window. Pinch to zoom on top of any mode; a two-finger double tap toggles it.
-- **Multiple displays.** Servers that report several screens (WayVNC `--desktop`, TigerVNC multi-head) get a Displays menu. Show all of them, pick one (remembered per connection), or open each in its own window and put them full screen on different Mac displays.
-- **macOS Screen Sharing servers.** Supports Apple's account-based authentication (RFB security type 30), as well as standard VNC passwords.
-- **Encodings.** Tight (with JPEG), ZRLE, Hextile, Zlib, RRE, CopyRect and Raw. Pseudo-encodings: cursor and alpha cursor, desktop resize and multi-screen layout, desktop name, continuous updates, fences, and the extended (UTF-8) clipboard.
-- **Automatic quality.** Lossless on fast links; Tight JPEG as the measured link rate or latency degrades. A stats overlay (⌃⌘I) shows frame rate, bandwidth, link estimate, latency and encodings.
-- **Survives sleep and network changes.** Dropped connections reconnect with backoff, reusing the session's credentials.
-- **SSH.** Tunnel VNC through SSH, start the VNC server on demand if it isn't running (WayVNC and TigerVNC presets), and drop files on the window to upload them. Uses the system `ssh`, so `~/.ssh/config`, keys and agents apply.
-- **Wake-on-LAN.** Wakes a sleeping computer before connecting, optionally through a relay machine on its LAN.
-- **Mac conventions.** Keychain passwords, Bonjour discovery, `vnc://` URLs, native full screen and window tabs, Unicode clipboard sync, ⌘-shortcut forwarding, full keyboard capture (⌘Tab, ⌘Space, Mission Control) in full screen, a menu bar item, and drag and drop: dropped text is pasted (hold ⌥ to type it instead).
-- **Launcher.** Recent computers appear with thumbnails of their last screen.
+## Highlights
 
-## Build and run
+- **Sharp on Retina.** The remote framebuffer lives in GPU-shared memory and is drawn by a Metal shader, with no per-frame copies. At 1:1 and integer zoom levels every remote pixel maps to whole device pixels. Large remotes (4K, 5K, 6K) are downscaled with a box filter instead of being aliased.
+- **Scaling that fits how you work.** Scale to Fit locks the window to the remote's aspect ratio. Actual Size shows pixels 1:1 and pans as you move the mouse. Resize Remote makes the server match your window. Pinch to zoom works on top of any of them.
+- **Multi-monitor remotes.** Show all displays, pick one (remembered per computer), or open each display in its own window and put them full screen on different Mac displays.
+- **macOS Screen Sharing.** Log in with a macOS account (Apple Remote Desktop authentication) as well as with a standard VNC password.
+- **Built for real networks.** Automatic quality picks lossless or JPEG from the measured link speed and latency. Dropped connections, sleep and network changes reconnect automatically. A stats overlay shows frame rate, bandwidth, latency and encodings.
+- **SSH built in.** Tunnel VNC through SSH, start the VNC server on demand when it isn't running, and drop files on the window to upload them. It uses your `~/.ssh/config`, keys and agent.
+- **Wake-on-LAN,** directly or through a relay machine on the sleeping computer's network.
+- **Unicode clipboard** in both directions with servers that support the extended clipboard, plus drag-and-drop pasting of text.
+- **Keyboard that behaves.** ⌘ shortcuts go to the remote. Full keyboard capture in full screen sends ⌘Tab, ⌘Space and Mission Control keys too. vncx keeps ⌃⌘ shortcuts, ⌘Q and ⌘H for itself.
 
-Requires macOS 15+ and the Swift 6 toolchain. Command Line Tools are enough; Xcode is not required.
+## Quick start
+
+Requirements: macOS 15 or later, and a Swift 6 toolchain. The Xcode Command Line Tools are enough.
 
 ```sh
-task run          # build build/vncx.app and open it
-task install      # copy it into ~/Applications
-task test         # unit tests (auth crypto, address parsing, decoders)
-task test-server  # Docker TigerVNC on localhost:5901, password "testpass"
-task wayvnc-server # Docker sway + WayVNC --desktop with two outputs on localhost:5902, no auth
-task probe        # headless decode test of every encoding against the TigerVNC server
+task run        # build build/vncx.app and open it
+task install    # copy it into ~/Applications
 ```
 
-You can also connect from the command line with `open build/vncx.app --args host:port`.
+Type a host name in the launcher and press Return. These address forms work:
 
-## Keyboard
+```
+durandal.local
+vegeta.example.ts.net:5901
+mac.local:1                  # display 1 = port 5901
+host::5999                   # explicit port
+vnc://alice@mac.local:5900
+```
 
-Keys are sent as X11 keysyms. Command maps to Super by default; you can change this in Settings. ⌘ shortcuts go to the remote computer, except ⌘Q, ⌘H, and every ⌃⌘ shortcut, which vncx keeps for its own menu:
+You can also open `vnc://` links from anywhere, or run `open build/vncx.app --args host:port`.
 
-| Shortcut | Action |
-|---|---|
-| ⌃⌘1 / ⌃⌘2 / ⌃⌘3 | Scale to Fit / Actual Size / Resize Remote |
-| ⌃⌘= / ⌃⌘- / ⌃⌘0 | Zoom in / out / reset |
-| ⌃⌘O | View only |
-| ⌃⌘I | Connection stats |
-| ⌃⌘⌫ | Send Control-Alt-Delete |
-| ⌃⌘V | Type clipboard text as keystrokes |
-| ⌃⌘S | Save screenshot to Desktop |
-| ⌃⌘D | Disconnect / reconnect |
+## Documentation
 
-## Layout
+- [User guide](docs/user-guide.md): connecting, windows, scaling and zoom, displays, keyboard, clipboard, SSH, Wake-on-LAN, settings, and every shortcut.
+- [Features and protocol support](docs/protocol.md): RFB versions, security types, encodings, pseudo-encodings and extensions.
+- [Server notes](docs/servers.md): macOS Screen Sharing, WayVNC, TigerVNC and ReFrame, with their quirks and recommended setups.
+- [How vncx compares](docs/comparison.md): differences from TigerVNC, RealVNC Viewer, Screen Sharing.app and others.
+- [Development](docs/development.md): building, code layout, tests, the probe tool, Docker test servers and debug hooks.
 
-- `Sources/VNCCore` contains the RFB protocol: transport, auth, and decoders. It has no UI dependencies.
-- `Sources/vncx` contains the SwiftUI app, the Metal renderer, and input handling.
-- `Sources/vncx-probe` is a headless client for integration testing.
-- `Sources/vncx-tests` is the unit test runner. Swift Testing does not discover tests under the Command Line Tools toolchain, so the tests run as a plain executable.
+## Status and limitations
 
-## Development notes
+vncx is young. It has been exercised against TigerVNC, WayVNC 0.10, macOS Screen Sharing and ReFrame. Known gaps:
 
-- The bundle is ad-hoc signed. Each rebuild changes the signature, so macOS asks again before vncx can read its saved keychain passwords. Signing with a stable identity avoids this.
-- Full keyboard capture needs the Accessibility permission. Ad-hoc builds lose it on every rebuild, like the keychain access above.
-- `VNCX_DEBUG_DIR=/some/dir` makes a run ephemeral: it stays in the background, never takes focus, and doesn't touch saved connections. `kill -USR1 <pid>` dumps window and session state, offscreen renders, and SwiftUI captures into the directory. `kill -USR2 <pid>` runs the action in `<dir>/action`: `select:N`, `openall`, `onewindow`, `upload:/a|/b`, or `type:text\n`.
-- `VNCX_OPEN_JSON=/path/connection.json` opens a fully specified connection, using the same format as `connections.json`.
-- `TRACE=1 vncx-probe host` prints every rectangle, screen layout and cursor the server sends, plus a stats summary.
-- niri (through 26.04) ignores its own key bindings for keys from virtual keyboards, which is how WayVNC types (niri issue #403, PR #4548). Super+arrow and other niri shortcuts therefore don't work over WayVNC, from any VNC client. Keys still reach applications.
-- Not supported yet: VeNCrypt/TLS security types, and Apple's private Screen Sharing extensions (macOS servers send no cursor shapes to standard clients). Tailscale already encrypts traffic for the intended use.
+- **No TLS security types.** VeNCrypt and the RSA-AES types aren't supported. Use Tailscale, a VPN, or the built-in SSH tunnel.
+- **No remote cursor on macOS servers.** macOS Screen Sharing doesn't send cursor shapes to standard VNC clients, so vncx shows a local cursor.
+- **niri shortcuts don't work over WayVNC.** niri ignores its own key bindings for keys from virtual keyboards, which is how WayVNC types. See [server notes](docs/servers.md#wayvnc).
+- **No file transfer over VNC.** VNC has no standard file transfer. vncx uploads dropped files over SSH instead.
