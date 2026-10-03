@@ -61,7 +61,7 @@ final class SessionWindowController: NSWindowController, NSWindowDelegate {
 
     private func resizeToIdeal() {
         guard let window, let fb = session.framebuffer, let view = session.view, !isFullScreen else { return }
-        let size = view.idealContentSize(for: fb, on: window.screen ?? NSScreen.main)
+        let size = view.idealContentSize(for: view.region.size, on: window.screen ?? NSScreen.main)
         setContentSize(size)
     }
 

@@ -13,6 +13,7 @@ struct RemoteViewRepresentable: NSViewRepresentable {
         view.smoothScaling = Preferences.shared.smoothScaling
         view.fallbackCursor = session.localCursor
         view.framebuffer = session.framebuffer
+        view.onZoomChange = { [weak session] z in session?.zoom = z }
         return view
     }
 

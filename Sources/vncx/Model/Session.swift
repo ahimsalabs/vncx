@@ -32,6 +32,8 @@ final class Session: Identifiable {
     private(set) var throughput = ""
     private(set) var securityType: SecurityType?
     var credentialPrompt: CredentialPrompt?
+    /// Current pinch zoom of the main view (1 = none), mirrored from the view for the UI.
+    var zoom: CGFloat = 1
 
     var scaling: ScalingMode {
         didSet {
@@ -87,6 +89,7 @@ final class Session: Identifiable {
         var parts: [String] = []
         if framebufferSize != .zero { parts.append("\(Int(framebufferSize.width))×\(Int(framebufferSize.height))") }
         if phase == .connected, !throughput.isEmpty { parts.append(throughput) }
+        if zoom > 1.001 { parts.append("\(Int((zoom * 100).rounded()))%") }
         if viewOnly { parts.append("View Only") }
         return parts.joined(separator: " · ")
     }
@@ -338,6 +341,10 @@ final class Session: Identifiable {
         lastPasteboardChange = pb.changeCount
         if let s = pb.string(forType: .string), !s.isEmpty { client.sendClipboard(s) }
     }
+
+    func zoomIn() { view.map { $0.setZoom($0.zoom * 1.25) } }
+    func zoomOut() { view.map { $0.setZoom($0.zoom / 1.25 < 1.03 ? 1 : $0.zoom / 1.25) } }
+    func resetZoom() { view?.setZoom(1) }
 
     func refresh() { client?.requestUpdate(incremental: false) }
 

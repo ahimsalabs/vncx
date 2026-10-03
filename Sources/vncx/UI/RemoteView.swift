@@ -48,6 +48,14 @@ final class RemoteView: MTKView {
 
     var backgroundRGBA = SIMD4<Float>(0, 0, 0, 1)
     private var panFraction = CGPoint(x: 0.5, y: 0.5)
+
+    private func updatePan(_ p: CGPoint) {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let fx = min(max(p.x / bounds.width, 0), 1), fy = min(max(p.y / bounds.height, 0), 1)
+        guard abs(fx - panFraction.x) > 0.0001 || abs(fy - panFraction.y) > 0.0001 else { return }
+        panFraction = CGPoint(x: fx, y: fy)
+        if isPanning { needsDisplay = true }
+    }
     private var buttons: UInt8 = 0
     private var pressedKeys: [UInt16: UInt32] = [:]
     private var pressedModifiers: [UInt16: UInt32] = [:]
@@ -87,41 +95,88 @@ final class RemoteView: MTKView {
 
     // MARK: Layout
 
+    /// Optional sub-rectangle of the framebuffer to show (one display of a multi-screen remote).
+    var crop: CGRect? { didSet { if crop != oldValue { layoutChanged() } } }
+
+    /// Pinch zoom on top of the scaling mode (1 = no zoom).
+    private(set) var zoom: CGFloat = 1 { didSet { if zoom != oldValue { layoutChanged(); onZoomChange?(zoom) } } }
+    var onZoomChange: ((CGFloat) -> Void)?
+    static let maxZoom: CGFloat = 8
+
+    /// The framebuffer region being shown.
+    var region: CGRect {
+        guard let fb = framebuffer else { return .zero }
+        let full = CGRect(x: 0, y: 0, width: fb.width, height: fb.height)
+        return crop?.intersection(full).nonEmpty ?? full
+    }
+
     func currentLayout() -> ViewLayout {
-        guard let fb = framebuffer else { return ViewLayout(dst: bounds, scale: 1, srcOrigin: .zero) }
-        let fw = CGFloat(fb.width), fh = CGFloat(fb.height)
+        guard framebuffer != nil else { return ViewLayout(dst: bounds, scale: 1, srcOrigin: .zero) }
+        let r = region
+        let fw = r.width, fh = r.height
         let bw = max(bounds.width, 1), bh = max(bounds.height, 1)
+        let bs = backingScale
+        var s: CGFloat
         switch scaling {
         case .fit, .remoteResize:
-            let bs = backingScale
-            var s = min(bw / fw, bh / fh)
+            s = min(bw / fw, bh / fh)
             // If we're within a pixel or two of an exact 1:1 or 2:1 device-pixel mapping, snap to it so text stays
             // sharp (window sizes are whole points, so odd remote sizes otherwise land at 0.4995 and blur).
             let devicePixelsPerFBPixel = s * bs
             let nearest = devicePixelsPerFBPixel.rounded()
             if nearest >= 1, abs(devicePixelsPerFBPixel - nearest) * max(fw, fh) < 2 { s = nearest / bs }
-            let w = fw * s, h = fh * s
-            let x = ((bw - w) / 2 * bs).rounded() / bs, y = ((bh - h) / 2 * bs).rounded() / bs
-            return ViewLayout(dst: CGRect(x: x, y: y, width: w, height: h), scale: s, srcOrigin: .zero)
         case .actual:
-            let s = 1 / backingScale
-            let w = fw * s, h = fh * s
-            var dst = CGRect.zero, src = CGPoint.zero
-            if w <= bw { dst.origin.x = ((bw - w) / 2).rounded(); dst.size.width = w }
-            else { dst.size.width = bw; src.x = ((fw - bw / s) * panFraction.x).rounded() }
-            if h <= bh { dst.origin.y = ((bh - h) / 2).rounded(); dst.size.height = h }
-            else { dst.size.height = bh; src.y = ((fh - bh / s) * panFraction.y).rounded() }
-            return ViewLayout(dst: dst, scale: s, srcOrigin: src)
+            s = 1 / bs
         }
+        s *= zoom
+        // Each axis either fits (centered) or overflows, in which case the view follows the pointer:
+        // pointer at 30% across the view shows the region 30% across the framebuffer.
+        let w = fw * s, h = fh * s
+        var dst = CGRect.zero, src = r.origin
+        if w <= bw + 0.5 {
+            dst.origin.x = ((bw - w) / 2 * bs).rounded() / bs; dst.size.width = w
+        } else {
+            dst.size.width = bw; src.x += ((fw - bw / s) * panFraction.x).rounded()
+        }
+        if h <= bh + 0.5 {
+            dst.origin.y = ((bh - h) / 2 * bs).rounded() / bs; dst.size.height = h
+        } else {
+            dst.size.height = bh; src.y += ((fh - bh / s) * panFraction.y).rounded()
+        }
+        return ViewLayout(dst: dst, scale: s, srcOrigin: src)
+    }
+
+    /// Whether the image currently overflows the view (so pointer movement pans).
+    private var isPanning: Bool {
+        let l = currentLayout(), r = region
+        return r.width * l.scale > bounds.width + 0.5 || r.height * l.scale > bounds.height + 0.5
+    }
+
+    func setZoom(_ z: CGFloat) { zoom = min(max(z, 1), Self.maxZoom) }
+
+    override func magnify(with event: NSEvent) {
+        updatePan(convert(event.locationInWindow, from: nil))
+        var z = zoom * (1 + event.magnification)
+        if z < 1.03 { z = 1 } // settle exactly at 1 so the unzoomed view stays pixel-snapped
+        setZoom(z)
+    }
+
+    /// Two-finger double tap: zoom to 1:1 device pixels (or 2x if already at least that), or back out.
+    override func smartMagnify(with event: NSEvent) {
+        updatePan(convert(event.locationInWindow, from: nil))
+        if zoom > 1 { setZoom(1); return }
+        let base = currentLayout().scale
+        let pixelExact = (1 / backingScale) / base
+        setZoom(pixelExact > 1.2 ? pixelExact : 2)
     }
 
     /// The window content size that shows the framebuffer pixel-for-pixel, capped to the screen.
-    func idealContentSize(for fb: Framebuffer, on screen: NSScreen?) -> CGSize {
+    func idealContentSize(for pixels: CGSize, on screen: NSScreen?) -> CGSize {
         let bs = screen?.backingScaleFactor ?? backingScale
-        var size = CGSize(width: CGFloat(fb.width) / bs, height: CGFloat(fb.height) / bs)
+        var size = CGSize(width: pixels.width / bs, height: pixels.height / bs)
         // Low-resolution remotes look tiny at 1:1 on Retina; use 1 point per pixel for those.
         if let screen, size.width < screen.visibleFrame.width * 0.5 {
-            size = CGSize(width: fb.width, height: fb.height)
+            size = pixels
         }
         if let visible = screen?.visibleFrame {
             let maxW = visible.width, maxH = visible.height - 60 // leave room for title bar / toolbar
@@ -257,17 +312,13 @@ final class RemoteView: MTKView {
     private func framebufferPoint(_ event: NSEvent) -> (Int, Int)? {
         guard let fb = framebuffer else { return nil }
         let p = convert(event.locationInWindow, from: nil)
-        if scaling == .actual, bounds.width > 0, bounds.height > 0 {
-            let fx = min(max(p.x / bounds.width, 0), 1), fy = min(max(p.y / bounds.height, 0), 1)
-            if abs(fx - panFraction.x) > 0.0001 || abs(fy - panFraction.y) > 0.0001 {
-                panFraction = CGPoint(x: fx, y: fy)
-                needsDisplay = true
-            }
-        }
-        let l = currentLayout()
+        updatePan(p)
+        let l = currentLayout(), r = region
         let x = Int(((p.x - l.dst.minX) / l.scale + l.srcOrigin.x).rounded(.down))
         let y = Int(((p.y - l.dst.minY) / l.scale + l.srcOrigin.y).rounded(.down))
-        return (min(max(x, 0), fb.width - 1), min(max(y, 0), fb.height - 1))
+        // Clamp to the visible region so a cropped display never sends the pointer onto another one.
+        return (min(max(x, Int(r.minX)), min(Int(r.maxX), fb.width) - 1),
+                min(max(y, Int(r.minY)), min(Int(r.maxY), fb.height) - 1))
     }
 
     private func sendPointer(_ event: NSEvent) {
@@ -412,4 +463,8 @@ final class RemoteView: MTKView {
         syms.forEach { client.sendKey($0, down: true) }
         syms.reversed().forEach { client.sendKey($0, down: false) }
     }
+}
+
+extension CGRect {
+    var nonEmpty: CGRect? { isEmpty || isNull ? nil : self }
 }

@@ -73,6 +73,16 @@ struct AppCommands: Commands {
             }
             .pickerStyle(.inline)
             .disabled(s == nil)
+            Button("Zoom In") { s?.zoomIn() }
+                .keyboardShortcut("=", modifiers: [.control, .command])
+                .disabled(s == nil)
+            Button("Zoom Out") { s?.zoomOut() }
+                .keyboardShortcut("-", modifiers: [.control, .command])
+                .disabled((s?.zoom ?? 1) <= 1)
+            Button("Reset Zoom") { s?.resetZoom() }
+                .keyboardShortcut("0", modifiers: [.control, .command])
+                .disabled((s?.zoom ?? 1) <= 1)
+            Divider()
             Picker("Local Cursor", selection: Binding(get: { s?.localCursor ?? .arrow }, set: { s?.localCursor = $0 })) {
                 ForEach(LocalCursorMode.allCases) { Text($0.label).tag($0) }
             }

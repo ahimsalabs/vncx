@@ -38,6 +38,13 @@ enum DebugDump {
                     report += "  session: phase=\(s.phase) title=\"\(s.title)\" subtitle=\"\(s.subtitle)\" prompt=\(s.credentialPrompt != nil)\n"
                 }
                 if let img = remote.renderOffscreen() { write(img, dir.appendingPathComponent("render-\(i).png")) }
+                // Also exercise the zoom path: 2x with the pointer at the view's center.
+                let z = remote.zoom
+                remote.setZoom(2)
+                let lz = remote.currentLayout()
+                report += "  zoom2: dst=\(lz.dst) scale=\(lz.scale) src=\(lz.srcOrigin)\n"
+                if let img = remote.renderOffscreen() { write(img, dir.appendingPathComponent("render-\(i)-zoom2.png")) }
+                remote.setZoom(z)
             }
         }
         // SwiftUI content isn't captured by cacheDisplay, so render the launcher cards directly.
