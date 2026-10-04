@@ -26,11 +26,10 @@ vncx needs macOS 15 or later.
 
    If you prefer Terminal: `xattr -dr com.apple.quarantine /Applications/vncx.app`
 
-Or install and update from Terminal. This quits vncx if it's running, replaces `/Applications/vncx.app` with the latest nightly and opens it. Downloads made with `curl` aren't quarantined, so there's no first-launch warning:
+Or install and update from Terminal. Quit vncx first if it's running (otherwise the old copy keeps running beside the new one). This replaces `/Applications/vncx.app` with the latest nightly and opens it. Downloads made with `curl` aren't quarantined, so there's no first-launch warning:
 
 ```sh
 curl -fsSL -o /tmp/vncx-macos.zip https://github.com/ahimsalabs/vncx/releases/download/nightly/vncx-macos.zip &&
-  osascript -e 'set b to "net.ahimsalabs.vncx"' -e 'try' -e 'if application id b is running then tell application id b to quit' -e 'end try' &&
   rm -rf /Applications/vncx.app &&
   ditto -x -k /tmp/vncx-macos.zip /Applications &&
   rm /tmp/vncx-macos.zip &&
