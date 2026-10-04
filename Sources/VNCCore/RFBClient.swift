@@ -113,6 +113,8 @@ package enum RFBEvent: @unchecked Sendable {
     case connected(name: String, framebuffer: Framebuffer, securityType: SecurityType?)
     case resized(Framebuffer)
     case updated
+    /// Part of a long update has been decoded into the framebuffer; worth drawing before the rest arrives.
+    case progress
     case cursor(RemoteCursor?)
     case bell
     case clipboard(String)
@@ -161,7 +163,9 @@ package final class RFBClient: @unchecked Sendable {
     private var cuStopping = false
     private var fenceSupported = false
     private var limit: Double?
-    private var lastRequestAt: UInt64 = 0
+    /// Pacing allowance in bits: it refills at the limit, up to `burstSeconds` worth, and each update spends its size.
+    private var tokens: Double = 0
+    private var tokensAt: UInt64 = 0
     /// When the oldest unanswered latency fence was sent.
     private var fencePendingSince: UInt64?
     /// A latency fence to send just before the next update request (see `measureLatency`).
@@ -215,13 +219,20 @@ package final class RFBClient: @unchecked Sendable {
 
     /// The longest a paced request waits, so one big update (a full refresh) costs a slow frame, not a freeze.
     private static let maxPacingWait = 1.5
+    /// How much unused allowance carries over, so an occasional big update after a quiet spell doesn't wait at all.
+    private static let burstSeconds = 1.0
 
     /// Caps the server's sending rate (bits/s; nil for no limit). With a limit, continuous updates are turned off and
-    /// update requests are paced instead: after an update of B bytes, the next request waits until B / limit has
-    /// passed since the previous one. Small updates (typing, pointer) go out at once; big ones (video) slow down.
+    /// update requests are paced instead, with a token bucket: the allowance refills at the limit (up to one second's
+    /// worth) and each update spends its size; when it runs short, the next request waits for it to refill.
+    /// Small updates (typing, pointer) go out at once; sustained big ones (video) slow to the limit.
     package func setBandwidthLimit(_ bitsPerSecond: Double?) {
         enum Change { case none, stop, start }
         let change = lock.withLock { () -> Change in
+            if let bitsPerSecond, limit == nil {
+                tokens = bitsPerSecond * Self.burstSeconds
+                tokensAt = DispatchTime.now().uptimeNanoseconds
+            }
             limit = bitsPerSecond
             if bitsPerSecond != nil && cuEnabled && !cuStopping { cuStopping = true; return .stop }
             if bitsPerSecond == nil && cuSupported && !cuEnabled { cuEnabled = true; return .start }
@@ -237,12 +248,17 @@ package final class RFBClient: @unchecked Sendable {
     /// Requests the next incremental update after one of `bytes` arrived, waiting first if a limit applies.
     private func requestNext(after bytes: UInt64) {
         let now = DispatchTime.now().uptimeNanoseconds
-        let due = lock.withLock { () -> UInt64? in
-            guard let limit else { return nil }
-            return lastRequestAt &+ UInt64(min(Double(bytes) * 8 / limit, Self.maxPacingWait) * 1e9)
+        let wait = lock.withLock { () -> Double in
+            guard let limit else { return 0 }
+            let elapsed = Double(now &- tokensAt) / 1e9
+            tokens = min(limit * Self.burstSeconds, tokens + elapsed * limit) - Double(bytes) * 8
+            tokensAt = now
+            // Don't let one huge update run up more debt than the longest wait can repay.
+            tokens = max(tokens, -limit * Self.maxPacingWait)
+            return tokens < 0 ? -tokens / limit : 0
         }
-        guard let due, due > now else { return requestUpdate(incremental: true) }
-        pacer.asyncAfter(deadline: DispatchTime(uptimeNanoseconds: due)) { [weak self] in
+        guard wait > 0 else { return requestUpdate(incremental: true) }
+        pacer.asyncAfter(deadline: .now() + wait) { [weak self] in
             guard let self, !self.transport.isCancelled else { return }
             self.requestUpdate(incremental: true)
         }
@@ -502,6 +518,7 @@ package final class RFBClient: @unchecked Sendable {
         let startBytes = consumed - 1
         let startTime = DispatchTime.now().uptimeNanoseconds
         var rectCounts: [Int32: Int] = [:], rectBytes: [Int32: UInt64] = [:]
+        var lastProgress = startTime
         try transport.skip(1)
         let count = Int(try transport.u16())
         var i = 0
@@ -514,6 +531,10 @@ package final class RFBClient: @unchecked Sendable {
             defer {
                 rectCounts[enc, default: 0] += 1
                 rectBytes[enc, default: 0] += consumed &- rectStart
+                // Rectangles land in the framebuffer as they decode, so a big update (a full refresh, or video on a
+                // slow link) can be shown filling in instead of all at once at the end. About once per display frame.
+                let now = DispatchTime.now().uptimeNanoseconds
+                if now &- lastProgress > 16_000_000 { lastProgress = now; onEvent(.progress) }
             }
             traceRect?(enc, x, y, w, h)
             guard let fb = framebuffer else { throw RFBError.protocol("update before init") }
@@ -708,7 +729,6 @@ package final class RFBClient: @unchecked Sendable {
     package func requestUpdate(incremental: Bool) {
         guard let fb = framebuffer else { return }
         let fence = lock.withLock { () -> Bool in
-            lastRequestAt = DispatchTime.now().uptimeNanoseconds
             defer { fenceBeforeRequest = false }
             return fenceBeforeRequest
         }

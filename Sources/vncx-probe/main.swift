@@ -119,7 +119,7 @@ client = RFBClient(options: options, credentialProvider: { req in
         if let c { print("cursor \(c.image.width)x\(c.image.height) hotspot \(c.hotspot)") }
     case .clipboard(let text):
         print("clipboard from server: \(text.debugDescription)")
-    case .bell, .nameChanged, .screens:
+    case .bell, .nameChanged, .screens, .progress:
         break
     case .disconnected(let err):
         failure = err

@@ -98,7 +98,7 @@ The client records, per update:
 
 The link rate is estimated from large updates, over 48 KB, as bytes divided by elapsed time, smoothed. Round-trip time comes from a fence with a timestamp payload, sent every 2 seconds when the server supports fences. When polling, the fence goes out just before the next update request instead, because WayVNC holds a fence reply behind an outstanding request until the screen changes. Automatic quality, the automatic bandwidth limit and the stats overlay use these numbers.
 
-A bandwidth limit turns continuous updates off (EnableContinuousUpdates with enable 0, then polling once the server's EndOfContinuousUpdates arrives) and paces FramebufferUpdateRequests: after an update of B bytes, the next request goes out no sooner than B / limit (at most 1.5 s) after the previous one.
+A bandwidth limit turns continuous updates off (EnableContinuousUpdates with enable 0, then polling once the server's EndOfContinuousUpdates arrives) and paces FramebufferUpdateRequests with a token bucket: the allowance refills at the limit up to one second's worth, each update spends its size, and when it's negative the next request waits until it refills (at most 1.5 s).
 
 ## Rendering
 

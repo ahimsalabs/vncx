@@ -324,7 +324,8 @@ final class Session: Identifiable {
             return self?.provideCredentials(request, config: snapshot, skipKeychain: skipKeychain, generation: gen)
         }, onEvent: { [weak self] event in
             guard let self else { return }
-            if case .updated = event {
+            switch event {
+            case .updated, .progress:
                 // Coalesce redraws: at most one pending main-queue hop at a time.
                 if self.redrawGate.arm() {
                     DispatchQueue.main.async {
@@ -332,9 +333,9 @@ final class Session: Identifiable {
                         for v in self.allViews { v.needsDisplay = true }
                     }
                 }
-                return
+            default:
+                DispatchQueue.main.async { if self.generation == gen { self.handle(event) } }
             }
-            DispatchQueue.main.async { if self.generation == gen { self.handle(event) } }
         })
         self.client = client
         client.setBandwidthLimit(config.bandwidth.bitsPerSecond)
@@ -445,7 +446,7 @@ final class Session: Identifiable {
         case .resized(let fb):
             setFramebuffer(fb)
             windowController?.remoteResized()
-        case .updated:
+        case .updated, .progress:
             allViews.forEach { $0.needsDisplay = true }
         case .cursor(let c):
             cursor = c

@@ -197,7 +197,9 @@ Hold ⌥ while dropping to type the text key by key instead. Typing only covers 
 
 JPEG only applies to servers that support Tight encoding. macOS Screen Sharing doesn't, so it's always lossless there.
 
-**Bandwidth limit** (per computer) caps how fast the server sends. Servers that support continuous updates otherwise send every change as soon as it happens, so a video on the remote can fill your link even at Low bandwidth. Under a limit, vncx asks for each update itself and, after an update of a given size, waits until that size divided by the limit has passed before asking for the next one, but never more than 1.5 seconds. Small updates such as typing and pointer movement go out at once; video and scrolling drop to the frame rate that fits.
+**Bandwidth limit** (per computer) caps how fast the server sends. Servers that support continuous updates otherwise send every change as soon as it happens, so a video on the remote can fill your link even at Low bandwidth. Under a limit, vncx asks for each update itself and paces the requests: an allowance refills at the limit, up to one second's worth, and each update spends its size. When the allowance runs out, the next request waits for it to refill, but never more than 1.5 seconds, so a limit can be exceeded when single updates are very large (a full-screen video frame on a 5K remote at a 5 Mbit/s limit). Small updates such as typing and pointer movement go out at once, an occasional big update after a quiet spell doesn't wait at all, and sustained video drops to the frame rate that fits.
+
+Large updates are drawn as they stream in rather than when the last part arrives, so a full refresh fills in progressively on a slow link.
 
 | Setting | Behavior |
 |---|---|
