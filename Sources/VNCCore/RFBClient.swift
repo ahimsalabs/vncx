@@ -573,6 +573,7 @@ package final class RFBClient: @unchecked Sendable {
                     let stopping = cuStopping
                     cuStopping = false
                     cuEnabled = false
+                    serverCU = false // the server stopped them, whether or not we asked
                     // The limit may have been lifted while we waited for the server to stop.
                     if stopping && limit == nil { cuEnabled = true; return .enable }
                     return .poll
@@ -845,6 +846,13 @@ package final class RFBClient: @unchecked Sendable {
     package func requestUpdate(incremental: Bool) {
         guard let fb = framebuffer else { return }
         lock.withLock {
+            // neatvnc never consumes an incremental request while continuous updates are on (its handler returns 0),
+            // so every later message from us would queue behind it unread. A paced request firing just after a limit
+            // was lifted could do that.
+            if incremental && serverCU {
+                flowLog.notice("dropped an incremental request under continuous updates")
+                return
+            }
             pacedSince = nil
             if requestSince == nil { requestSince = DispatchTime.now().uptimeNanoseconds }
             if fenceWanted && serverPending == 0 { sendLatencyFenceLocked() }
