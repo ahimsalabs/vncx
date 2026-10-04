@@ -744,6 +744,10 @@ final class Session: Identifiable {
         if config.quality == .auto { adjustQuality(now, previous: prev) }
     }
 
+    /// Automatic goes no lower: below JPEG 4 a full repaint on WayVNC shrinks only another 14% (3.7 → 3.2 MB on a 5K
+    /// desktop) while text gets visibly blocky. JPEG 0 to 3 stay available as manual choices.
+    private static let lowestAutomatic = Quality.jpeg(4)
+
     /// Bytes per pixel of a full repaint at each level, measured on a 4915×3648 WayVNC desktop. WayVNC sends every
     /// 64×64 tile as its own JPEG, so headers flatten the low end; JPEG 9 costs more than lossless there.
     private static let typicalBytesPerPixel: [Quality: Double] = [
@@ -785,7 +789,9 @@ final class Session: Identifiable {
             screen * (Self.typicalBytesPerPixel[q] ?? 0.4) * bytesPerPixelCorrection * 8 / rate + rtt
         }
         let cap = levelCapForDisplay
-        let target = Quality.levels.first { $0.rank <= cap.rank && repaintSeconds($0) <= 0.5 } ?? .jpeg(0)
+        let target = Quality.levels.first {
+            $0.rank <= cap.rank && $0.rank > Self.lowestAutomatic.rank && repaintSeconds($0) <= 0.5
+        } ?? Self.lowestAutomatic
         guard target != st.level else { pendingLevel = nil; return }
         let count = (pendingLevel?.level == target ? pendingLevel!.count : 0) + 1
         pendingLevel = (target, count)
