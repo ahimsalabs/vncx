@@ -5,7 +5,7 @@
 // Exercises auth and decoders against real servers without the UI.
 //
 //   vncx-probe host[:port] [--password PW] [--user NAME] [--encoding raw|copyrect|rre|hextile|zlib|tight|zrle|tightjpeg]
-//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--limit MBIT] [--watch]
+//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--limit MBIT] [--limit-after S] [--watch]
 import Foundation
 import Network
 import CoreGraphics
@@ -23,6 +23,8 @@ let user = option("--user") ?? ""
 let encodingName = option("--encoding")
 let quality = Quality(rawValue: option("--quality") ?? "") ?? .lossless
 let limit = option("--limit").flatMap(Double.init).map { $0 * 1e6 }
+/// Apply --limit this many seconds into the session instead of before connecting (as the automatic limit does).
+let limitAfter = option("--limit-after").flatMap(Double.init)
 let frames = Int(option("--frames") ?? "3") ?? 3
 let seconds = Double(option("--seconds") ?? "20") ?? 20
 let out = option("--out")
@@ -136,7 +138,14 @@ if ProcessInfo.processInfo.environment["TRACE"] != nil {
 client.traceScreens = { reason, status, list in
     print("  layout reason=\(reason) status=\(status): \(list.map(\.description).joined(separator: ", "))")
 }
-client.setBandwidthLimit(limit)
+if let limitAfter {
+    DispatchQueue.global().asyncAfter(deadline: .now() + limitAfter) {
+        print("setting limit \(limit.map { "\($0 / 1e6) Mbit/s" } ?? "none")")
+        client.setBandwidthLimit(limit)
+    }
+} else {
+    client.setBandwidthLimit(limit)
+}
 client.start()
 let ping = DispatchSource.makeTimerSource(queue: .global())
 if watch {
