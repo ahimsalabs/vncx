@@ -5,7 +5,7 @@
 // Exercises auth and decoders against real servers without the UI.
 //
 //   vncx-probe host[:port] [--password PW] [--user NAME] [--encoding raw|copyrect|rre|hextile|zlib|tight|zrle|tightjpeg]
-//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--limit MBIT] [--limit-after S] [--key-at T:SYMS ...] [--watch]
+//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--limit MBIT] [--limit-after S] [--key-at T:SYMS ...] [--scroll-at T:X,Y,CLICKS ...] [--watch]
 import Foundation
 import Network
 import CoreGraphics
@@ -25,6 +25,13 @@ let quality = Quality(rawValue: option("--quality") ?? "") ?? .lossless
 let limit = option("--limit").flatMap(Double.init).map { $0 * 1e6 }
 /// Apply --limit this many seconds into the session instead of before connecting (as the automatic limit does).
 let limitAfter = option("--limit-after").flatMap(Double.init)
+/// Timed wheel scrolls, e.g. --scroll-at 3:3700,2600,10 scrolls down 10 clicks at (3700, 2600) over a second
+/// (negative CLICKS scrolls up). Repeatable.
+var scrollTimes: [(t: Double, x: Int, y: Int, clicks: Int)] = []
+while let spec = option("--scroll-at"), let colon = spec.firstIndex(of: ":"), let t = Double(spec[..<colon]) {
+    let v = spec[spec.index(after: colon)...].split(separator: ",").compactMap { Int($0) }
+    if v.count == 3 { scrollTimes.append((t, v[0], v[1], v[2])) }
+}
 /// Timed key combos, e.g. --key-at 3:ffe3,74 presses Control+t three seconds after connecting. Repeatable.
 var keyTimes: [(Double, [UInt32])] = []
 while let spec = option("--key-at"), let colon = spec.firstIndex(of: ":"), let t = Double(spec[..<colon]) {
@@ -163,6 +170,16 @@ for (t, syms) in keyTimes {
         print(String(format: "%7.2fs keys %@", Date().timeIntervalSince(start), syms.map { String($0, radix: 16) }.joined(separator: "+")))
         syms.forEach { client.sendKey($0, down: true) }
         syms.reversed().forEach { client.sendKey($0, down: false) }
+    }
+}
+for s in scrollTimes {
+    for i in 0..<abs(s.clicks) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + s.t + Double(i) / Double(abs(s.clicks))) {
+            if i == 0 { print(String(format: "%7.2fs scroll %d clicks", Date().timeIntervalSince(start), s.clicks)) }
+            let bit: UInt8 = s.clicks > 0 ? 16 : 8
+            client.sendPointer(x: s.x, y: s.y, buttons: bit)
+            client.sendPointer(x: s.x, y: s.y, buttons: 0)
+        }
     }
 }
 let ping = DispatchSource.makeTimerSource(queue: .global())

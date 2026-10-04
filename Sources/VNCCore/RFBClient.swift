@@ -59,15 +59,65 @@ package enum SecurityType: UInt8 {
     }
 }
 
-package enum Quality: String, Codable, CaseIterable, Identifiable {
-    case auto, lossless, balanced, low
+/// Picture quality: lossless, or Tight with a JPEG quality from 0 (smallest) to 9. `.auto` is a setting, not a level.
+package enum Quality: Hashable, Codable, CaseIterable, Identifiable, Sendable {
+    case auto, lossless, jpeg(Int)
+
+    package static let balanced = Quality.jpeg(8)
+    package static let low = Quality.jpeg(4)
+    package static var allCases: [Quality] { [.auto, .lossless] + (0...9).reversed().map { .jpeg($0) } }
+    /// Levels from best to smallest.
+    package static var levels: [Quality] { allCases.filter { $0 != .auto } }
+
+    package var rawValue: String {
+        switch self {
+        case .auto: return "auto"
+        case .lossless: return "lossless"
+        case .jpeg(let q): return "jpeg\(q)"
+        }
+    }
+
+    package init?(rawValue: String) {
+        switch rawValue {
+        case "auto": self = .auto
+        case "lossless": self = .lossless
+        case "balanced": self = .balanced // names saved by earlier versions
+        case "low": self = .low
+        default:
+            guard rawValue.hasPrefix("jpeg"), let q = Int(rawValue.dropFirst(4)), (0...9).contains(q) else { return nil }
+            self = .jpeg(q)
+        }
+    }
+
+    package init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        guard let q = Quality(rawValue: raw) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unknown quality \(raw)"))
+        }
+        self = q
+    }
+
+    package func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
+
     package var id: String { rawValue }
     package var label: String {
         switch self {
         case .auto: return "Automatic"
         case .lossless: return "Best (lossless)"
-        case .balanced: return "Balanced"
-        case .low: return "Low bandwidth"
+        case .jpeg(8): return "JPEG 8 · Balanced"
+        case .jpeg(4): return "JPEG 4 · Low bandwidth"
+        case .jpeg(0): return "JPEG 0 · Smallest"
+        case .jpeg(let q): return "JPEG \(q)"
+        }
+    }
+    /// Orders levels: lossless highest, then JPEG 9 down to 0.
+    package var rank: Int {
+        switch self {
+        case .auto, .lossless: return 10
+        case .jpeg(let q): return q
         }
     }
 }
@@ -100,6 +150,8 @@ package struct RFBStats: Sendable {
     package var continuousUpdates = false
     package var fenceSupported = false
     package var level: Quality = .lossless
+    /// Pixels covered by framebuffer rectangles (not pseudo-encodings), for bytes per pixel.
+    package var pixels: UInt64 = 0
     /// The bandwidth limit in force (bits/s), nil when unlimited.
     package var limit: Double?
 }
@@ -573,6 +625,7 @@ package final class RFBClient: @unchecked Sendable {
         let startBytes = consumed - 1
         let startTime = DispatchTime.now().uptimeNanoseconds
         var rectCounts: [Int32: Int] = [:], rectBytes: [Int32: UInt64] = [:]
+        var rectPixels: UInt64 = 0
         var lastProgress = startTime
         lock.withLock { updateSince = (startTime, startBytes); requestSince = nil }
         defer { lock.withLock { updateSince = nil } }
@@ -588,6 +641,7 @@ package final class RFBClient: @unchecked Sendable {
             defer {
                 rectCounts[enc, default: 0] += 1
                 rectBytes[enc, default: 0] += consumed &- rectStart
+                if enc >= 0 { rectPixels += UInt64(w * h) }
                 // Rectangles land in the framebuffer as they decode, so a big update (a full refresh, or video on a
                 // slow link) can be shown filling in instead of all at once at the end. About once per display frame.
                 let now = DispatchTime.now().uptimeNanoseconds
@@ -595,6 +649,7 @@ package final class RFBClient: @unchecked Sendable {
             }
             traceRect?(enc, x, y, w, h)
             guard let fb = framebuffer else { throw RFBError.protocol("update before init") }
+            if enc != Encoding.tight { try tight.flush(fb) } // batched Tight JPEGs draw before anything after them
             switch enc {
             case Encoding.raw: try BasicDecoders.raw(transport, fb, x: x, y: y, w: w, h: h)
             case Encoding.copyRect: try BasicDecoders.copyRect(transport, fb, x: x, y: y, w: w, h: h)
@@ -617,10 +672,12 @@ package final class RFBClient: @unchecked Sendable {
             }
             if enc == Encoding.lastRect { break }
         }
+        if let fb = framebuffer { try tight.flush(fb) }
         let total = consumed &- startBytes
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - startTime) / 1e9
         let continuous = lock.withLock { () -> Bool in
             stats.updates += 1
+            stats.pixels += rectPixels
             for (e, n) in rectCounts { stats.rectCount[e, default: 0] += n }
             for (e, b) in rectBytes { stats.rectBytes[e, default: 0] += b }
             // Only large updates say anything about the link; small ones are dominated by latency.
@@ -769,7 +826,7 @@ package final class RFBClient: @unchecked Sendable {
         var encs: [Int32] = [Encoding.copyRect]
         switch current {
         case .lossless, .auto: encs += [Encoding.zrle, Encoding.tight]
-        case .balanced, .low: encs += [Encoding.tight, Encoding.zrle]
+        case .jpeg: encs += [Encoding.tight, Encoding.zrle]
         }
         encs += [Encoding.hextile, Encoding.zlib, Encoding.rre, Encoding.raw,
                  Encoding.cursorWithAlpha, Encoding.cursor, Encoding.desktopSize, Encoding.extendedDesktopSize,
@@ -777,8 +834,8 @@ package final class RFBClient: @unchecked Sendable {
                  Encoding.fence, Encoding.continuousUpdates]
         switch current {
         case .lossless, .auto: encs += [Encoding.compressLevel(1)]
-        case .balanced: encs += [Encoding.jpegQuality(8), Encoding.compressLevel(2)]
-        case .low: encs += [Encoding.jpegQuality(4), Encoding.compressLevel(6)]
+        // Lower JPEG quality pairs with harder zlib for the tiles sent without JPEG.
+        case .jpeg(let q): encs += [Encoding.jpegQuality(q), Encoding.compressLevel(q >= 8 ? 2 : q >= 5 ? 4 : 6)]
         }
         var msg: [UInt8] = [2, 0, UInt8(encs.count >> 8), UInt8(encs.count & 0xff)]
         for e in encs { msg += be32(UInt32(bitPattern: e)) }

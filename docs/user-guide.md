@@ -190,14 +190,13 @@ Hold ⌥ while dropping to type the text key by key instead. Typing only covers 
 
 | Setting | Behavior |
 |---|---|
-| **Automatic** (default) | Picks the best level at which a full-screen repaint (a tab switch, a new window) would arrive within half a second, judged from the remote's size and the measured delivery rate. A 1440p remote on a fast link stays lossless; a 5K desktop on a 100 Mbit/s link uses Balanced, where lossless would make every tab switch an 8 to 12 MB update. Changes are smoothed: it downgrades after about 3 seconds of evidence and upgrades after about 6, so it doesn't flap. |
+| **Automatic** (default) | Picks the best level at which a full-screen repaint (a tab switch, a new window) would arrive within half a second, from the remote's size, the measured delivery rate and how many bytes per pixel each level has actually cost on this connection. It also caps the level by how the remote is shown: at under 0.9 screen pixels per remote pixel it goes no higher than JPEG 8, under 0.6 no higher than JPEG 6, and under 0.4 no higher than JPEG 4, since smaller artifacts can't be seen. A 1440p remote on a fast link stays lossless; a 5K desktop in a laptop window ends up around JPEG 6. Changes are smoothed: it downgrades after about 3 seconds of evidence and upgrades after about 6, so it doesn't flap. |
 | **Best (lossless)** | Always lossless (ZRLE or Tight without JPEG). |
-| **Balanced** | Tight with JPEG quality 8. |
-| **Low bandwidth** | Tight with JPEG quality 4 and stronger compression. |
+| **JPEG 9 to 0** | Tight with that JPEG quality; 8 was called Balanced and 4 Low bandwidth. Lower levels also compress the non-JPEG tiles harder. On WayVNC, which sends every 64×64 tile as its own JPEG, the headers flatten the savings: a full repaint of a 5K desktop measured 4.6 MB at 8, 3.7 MB at 4 and 3.2 MB at 0, and 9 cost more than lossless. |
 
 JPEG only applies to servers that support Tight encoding. macOS Screen Sharing doesn't, so it's always lossless there.
 
-**Bandwidth limit** (per computer) caps how fast the server sends. Servers that support continuous updates otherwise send every change as soon as it happens, so a video on the remote can fill your link even at Low bandwidth. Under a limit, vncx asks for each update itself and paces the requests: an allowance refills at the limit, up to one second's worth, and each update spends its size. When the allowance runs out, the next request waits for it to refill, but never more than 1.5 seconds, so a limit can be exceeded when single updates are very large (a full-screen video frame on a 5K remote at a 5 Mbit/s limit). Small updates such as typing and pointer movement go out at once, an occasional big update after a quiet spell doesn't wait at all, and sustained video drops to the frame rate that fits.
+**Bandwidth limit** (per computer) caps how fast the server sends. Servers that support continuous updates otherwise send every change as soon as it happens, so a video on the remote can fill your link even at JPEG 0. Under a limit, vncx asks for each update itself and paces the requests: an allowance refills at the limit, up to one second's worth, and each update spends its size. When the allowance runs out, the next request waits for it to refill, but never more than 1.5 seconds, so a limit can be exceeded when single updates are very large (a full-screen video frame on a 5K remote at a 5 Mbit/s limit). Small updates such as typing and pointer movement go out at once, an occasional big update after a quiet spell doesn't wait at all, and sustained video drops to the frame rate that fits.
 
 Large updates are drawn as they stream in rather than when the last part arrives, so a full refresh fills in progressively on a slow link.
 
@@ -296,7 +295,7 @@ Edit… on a computer, or **+** in the launcher.
 | SSH | Use SSH, Destination, Tunnel, Forward to, Start server…, Upload dropped files to, Test SSH | See [SSH](#ssh). |
 | Display | Scaling | Scale to Fit, Fill Width, Fill Height, Actual Size or Resize Remote. |
 | | Use Retina resolution when resizing remote | Resize Remote asks for pixels instead of points. |
-| | Picture quality | Automatic, Best, Balanced or Low bandwidth. |
+| | Picture quality | Automatic, Best (lossless), or JPEG 9 to 0. |
 | | Bandwidth limit | Automatic, Unlimited, or 50, 20, 10 or 5 Mbit/s. |
 | | View only | Start sessions in view-only mode. |
 | | Paste dropped text with | Automatic, Ctrl+V, Command+V, Ctrl+Shift+V or Shift+Insert. |

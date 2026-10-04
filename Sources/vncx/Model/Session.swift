@@ -689,6 +689,7 @@ final class Session: Identifiable {
         lastSnapshot = nil
         statsTick = 0
         pendingLevel = nil
+        bytesPerPixelCorrection = 1
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.statsTimerFired()
         }
@@ -740,39 +741,58 @@ final class Session: Identifiable {
         }
         if text != throughput { throughput = text }
 
-        if config.quality == .auto { adjustQuality(now) }
+        if config.quality == .auto { adjustQuality(now, previous: prev) }
     }
 
-    /// Automatic quality: the best level at which a full-screen repaint would arrive within half a second, from the
-    /// screen size, typical bytes per pixel at each level, and the measured delivery rate. Raw link speed alone
-    /// picks lossless for a 5K desktop on a fast link, where a tab switch then costs 8 to 12 MB and seconds.
-    /// Downgrades after 3 s of evidence, upgrades after 6 s, so it doesn't flap.
-    private func adjustQuality(_ st: RFBStats) {
+    /// Bytes per pixel of a full repaint at each level, measured on a 4915×3648 WayVNC desktop. WayVNC sends every
+    /// 64×64 tile as its own JPEG, so headers flatten the low end; JPEG 9 costs more than lossless there.
+    private static let typicalBytesPerPixel: [Quality: Double] = [
+        .lossless: 0.40, .jpeg(9): 0.50, .jpeg(8): 0.26, .jpeg(7): 0.24, .jpeg(6): 0.22, .jpeg(5): 0.215,
+        .jpeg(4): 0.21, .jpeg(3): 0.20, .jpeg(2): 0.196, .jpeg(1): 0.19, .jpeg(0): 0.18]
+    /// Observed bytes per pixel ÷ the typical figure at the current level, so the table fits this server and
+    /// desktop (TigerVNC sends far fewer JPEG headers; a desktop of text compresses better than a video).
+    @ObservationIgnored private var bytesPerPixelCorrection = 1.0
+
+    /// The best level worth sending for how the remote is shown: when several remote pixels land on one screen
+    /// pixel, JPEG artifacts shrink below what you can see.
+    private var levelCapForDisplay: Quality {
+        guard let v = view else { return .lossless }
+        let devicePixelsPerRemotePixel = v.currentLayout().scale * v.backingScale
+        switch devicePixelsPerRemotePixel {
+        case 0.9...: return .lossless
+        case 0.6..<0.9: return .jpeg(8)
+        case 0.4..<0.6: return .jpeg(6)
+        default: return .jpeg(4)
+        }
+    }
+
+    /// Automatic quality: the best level, up to the display cap, at which a full-screen repaint (a tab switch, a new
+    /// window) would arrive within half a second, from the remote's size, bytes per pixel at each level and the
+    /// measured delivery rate. Raw link speed alone picks lossless for a 5K desktop on a fast link, where a tab
+    /// switch then costs 8 to 12 MB and seconds. Downgrades after 3 s of evidence, upgrades after 6 s.
+    private func adjustQuality(_ st: RFBStats, previous prev: RFBStats) {
+        // Learn from about a megapixel or more of updates at one level.
+        let pixels = st.pixels &- prev.pixels
+        if pixels > 1_000_000, st.level == prev.level, let typical = Self.typicalBytesPerPixel[st.level] {
+            let bytes = st.rectBytes.filter { $0.key >= 0 }.reduce(0.0) { $0 + Double($1.value &- (prev.rectBytes[$1.key] ?? 0)) }
+            let observed = min(max(bytes / Double(pixels) / typical, 0.25), 4)
+            bytesPerPixelCorrection = bytesPerPixelCorrection * 0.7 + observed * 0.3
+        }
         guard let rate = st.linkRate.map({ $0 * 8 }), rate > 0 else { return } // bits/s; unknown until a big update
-        let pixels = Double(framebufferSize.width * framebufferSize.height)
+        let screen = Double(framebufferSize.width * framebufferSize.height)
         let rtt = st.rtt ?? 0
         func repaintSeconds(_ q: Quality) -> Double {
-            let bytesPerPixel: Double
-            switch q {
-            case .lossless, .auto: bytesPerPixel = 0.6 // ZRLE on a typical desktop
-            case .balanced: bytesPerPixel = 0.12
-            case .low: bytesPerPixel = 0.06
-            }
-            return pixels * bytesPerPixel * 8 / rate + rtt
+            screen * (Self.typicalBytesPerPixel[q] ?? 0.4) * bytesPerPixelCorrection * 8 / rate + rtt
         }
-        let target = [Quality.lossless, .balanced].first { repaintSeconds($0) <= 0.5 } ?? .low
+        let cap = levelCapForDisplay
+        let target = Quality.levels.first { $0.rank <= cap.rank && repaintSeconds($0) <= 0.5 } ?? .jpeg(0)
         guard target != st.level else { pendingLevel = nil; return }
         let count = (pendingLevel?.level == target ? pendingLevel!.count : 0) + 1
         pendingLevel = (target, count)
-        let upgrading = rank(target) > rank(st.level)
-        if count >= (upgrading ? 6 : 3) {
+        if count >= (target.rank > st.level.rank ? 6 : 3) {
             client?.setQualityLevel(target)
             pendingLevel = nil
         }
-    }
-
-    private func rank(_ q: Quality) -> Int {
-        switch q { case .low: return 0; case .balanced: return 1; case .lossless, .auto: return 2 }
     }
 
     // MARK: Images

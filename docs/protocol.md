@@ -57,8 +57,8 @@ Preference order depends on the picture-quality level. Lossless puts ZRLE before
 | -312 | Fence | Yes | Server fences are answered; client fences measure round-trip time. |
 | -313 | ContinuousUpdates | Yes | Server-pushed updates without a request per frame. |
 | 0xC0A1E5CE | Extended Clipboard | Yes (text) | UTF-8 clipboard with caps, notify, request, peek and provide. |
-| -23 … -32 | JPEG quality level | Yes | Sent for the Balanced (8) and Low bandwidth (4) levels. |
-| -247 … -256 | Compression level | Yes | 1 for lossless, 2 for Balanced, 6 for Low bandwidth. |
+| -23 … -32 | JPEG quality level | Yes | Sent for the JPEG levels 0–9. |
+| -247 … -256 | Compression level | Yes | 1 for lossless; 2 for JPEG 8–9, 4 for JPEG 5–7, 6 for JPEG 0–4. |
 | -258 | QEMU Extended Key Event | No | |
 | -316 | ExtendedMouseButtons | No | |
 | -412 … -512, -763 … -768 | Fine-grained JPEG quality, JPEG subsampling | No | |

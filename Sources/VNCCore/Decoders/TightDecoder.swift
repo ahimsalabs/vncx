@@ -10,8 +10,27 @@ import CoreGraphics
 package final class TightDecoder {
     private var streams = (0..<4).map { _ in ZStream() }
     private var scratch = [UInt32]()
+    /// JPEG rectangles read but not yet decoded. Decoding a JPEG costs about 100 µs however small it is, and some
+    /// servers (WayVNC) send every 64×64 tile as its own JPEG, so a scroll repaint is a thousand of them: decoding
+    /// them one by one on the reader thread caps the frame rate. They cover separate areas, so a batch is decoded
+    /// in parallel. Call `flush` before anything else draws (another rectangle) and at the end of each update.
+    private var pendingJPEG: [(data: Data, x: Int, y: Int, w: Int, h: Int)] = []
+    private static let batchSize = 64
 
     package init() {}
+
+    /// Decodes the JPEG rectangles read so far into the framebuffer.
+    package func flush(_ fb: Framebuffer) throws {
+        guard !pendingJPEG.isEmpty else { return }
+        let batch = pendingJPEG
+        pendingJPEG.removeAll(keepingCapacity: true)
+        let failed = ManagedAtomicFlag()
+        DispatchQueue.concurrentPerform(iterations: batch.count) { i in
+            let j = batch[i]
+            do { try Self.decodeJPEG(j.data, fb, x: j.x, y: j.y, w: j.w, h: j.h) } catch { failed.set() }
+        }
+        if failed.isSet { throw RFBError.protocol("invalid JPEG rectangle") }
+    }
 
     package func reset() { streams.forEach { $0.reset() } }
 
@@ -19,6 +38,7 @@ package final class TightDecoder {
         let control = try t.u8()
         for i in 0..<4 where control & (1 << i) != 0 { streams[i].reset() }
         let kind = control >> 4
+        if kind != 0x09 { try flush(fb) } // keep drawing order: pending JPEGs land first
 
         if kind == 0x08 { // fill
             let p = try t.bytes(3)
@@ -27,7 +47,8 @@ package final class TightDecoder {
         }
         if kind == 0x09 { // JPEG
             let len = try compactLength(t)
-            try t.withBytes(len) { try decodeJPEG($0, fb, x: x, y: y, w: w, h: h) }
+            pendingJPEG.append((try t.withBytes(len) { Data($0) }, x, y, w, h))
+            if pendingJPEG.count >= Self.batchSize { try flush(fb) }
             return
         }
         guard kind & 0x08 == 0 else { throw RFBError.protocol("unsupported Tight compression \(kind)") }
@@ -113,8 +134,9 @@ package final class TightDecoder {
         return len
     }
 
-    private func decodeJPEG(_ bytes: UnsafeRawBufferPointer, _ fb: Framebuffer, x: Int, y: Int, w: Int, h: Int) throws {
-        let data = Data(bytes)
+    private static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+
+    private static func decodeJPEG(_ data: Data, _ fb: Framebuffer, x: Int, y: Int, w: Int, h: Int) throws {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
             throw RFBError.protocol("invalid JPEG rectangle")
@@ -123,10 +145,18 @@ package final class TightDecoder {
         // Draw straight into the framebuffer memory: BGRA little-endian == 32-bit host order, premultipliedFirst.
         let info = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
         guard let ctx = CGContext(data: fb.row(r.y) + r.x, width: r.w, height: r.h, bitsPerComponent: 8,
-                                  bytesPerRow: fb.bytesPerRow, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bytesPerRow: fb.bytesPerRow, space: Self.sRGB,
                                   bitmapInfo: info) else { return }
         ctx.interpolationQuality = .none
         // CG's origin is bottom-left and memory row 0 is the top, so flip the image's bottom edge into context space.
         ctx.draw(image, in: CGRect(x: x - r.x, y: r.h - (y + h - r.y), width: w, height: h))
     }
+}
+
+/// A set-once flag that's safe to set from several threads at once.
+private final class ManagedAtomicFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.withLock { value = true } }
+    var isSet: Bool { lock.withLock { value } }
 }

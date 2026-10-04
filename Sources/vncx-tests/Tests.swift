@@ -204,3 +204,16 @@ struct WakeTests {
         expect(p.count == 102 && p.prefix(6).allSatisfy { $0 == 0xff } && Array(p[96..<102]) == m)
     }
 }
+
+struct QualityTests {
+    func rawValues() throws {
+        expect(Quality(rawValue: "balanced") == .jpeg(8), "earlier 'balanced' reads as JPEG 8")
+        expect(Quality(rawValue: "low") == .jpeg(4), "earlier 'low' reads as JPEG 4")
+        expect(Quality(rawValue: "jpeg10") == nil && Quality(rawValue: "jpeg") == nil)
+        for q in Quality.allCases { expect(Quality(rawValue: q.rawValue) == q, "\(q.rawValue) round-trips") }
+        let data = try JSONEncoder().encode([Quality.jpeg(3), .lossless])
+        expect(String(decoding: data, as: UTF8.self) == #"["jpeg3","lossless"]"#)
+        expect(try JSONDecoder().decode([Quality].self, from: Data(#"["balanced","auto"]"#.utf8)) == [.jpeg(8), .auto])
+        expect(Quality.levels.map(\.rank) == Array((0...10).reversed()), "levels run from lossless down to JPEG 0")
+    }
+}
