@@ -437,7 +437,7 @@ struct StatsOverlay: View {
             row("Link", stats.linkBitsPerSecond.map(rate) ?? "measuring…")
             row("Latency", stats.rttMs.map { String(format: "%.1f ms", $0) } ?? "n/a")
             row("Encoding", stats.encodings.isEmpty ? "–" : stats.encodings.map { "\($0.name) \(Int(($0.share * 100).rounded()))%" }.joined(separator: ", "))
-            row("Quality", (auto ? "Auto · " : "") + stats.level.label + (stats.inMotion ? " · moving: JPEG 4" : ""))
+            row("Quality", (auto ? "Auto · " : "") + (stats.inMotion ? "JPEG 4 · moving" : stats.level.label))
         }
         .font(.system(size: 11, design: .monospaced))
         .padding(10)
@@ -448,7 +448,11 @@ struct StatsOverlay: View {
     private func row(_ k: String, _ v: String) -> some View {
         GridRow {
             Text(k).foregroundStyle(.secondary)
-            Text(v)
+            // A fixed-width column, so the overlay doesn't change size as the numbers do.
+            ZStack(alignment: .leading) {
+                Text(String(repeating: "0", count: 30)).hidden()
+                Text(v).lineLimit(1).truncationMode(.tail)
+            }
         }
     }
 }
