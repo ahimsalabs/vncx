@@ -5,7 +5,7 @@
 // Exercises auth and decoders against real servers without the UI.
 //
 //   vncx-probe host[:port] [--password PW] [--user NAME] [--encoding raw|copyrect|rre|hextile|zlib|tight|zrle|tightjpeg]
-//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--limit MBIT] [--limit-after S] [--watch]
+//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--limit MBIT] [--limit-after S] [--key-at T:SYMS ...] [--watch]
 import Foundation
 import Network
 import CoreGraphics
@@ -25,6 +25,11 @@ let quality = Quality(rawValue: option("--quality") ?? "") ?? .lossless
 let limit = option("--limit").flatMap(Double.init).map { $0 * 1e6 }
 /// Apply --limit this many seconds into the session instead of before connecting (as the automatic limit does).
 let limitAfter = option("--limit-after").flatMap(Double.init)
+/// Timed key combos, e.g. --key-at 3:ffe3,74 presses Control+t three seconds after connecting. Repeatable.
+var keyTimes: [(Double, [UInt32])] = []
+while let spec = option("--key-at"), let colon = spec.firstIndex(of: ":"), let t = Double(spec[..<colon]) {
+    keyTimes.append((t, spec[spec.index(after: colon)...].split(separator: ",").compactMap { UInt32($0, radix: 16) }))
+}
 let frames = Int(option("--frames") ?? "3") ?? 3
 let seconds = Double(option("--seconds") ?? "20") ?? 20
 let out = option("--out")
@@ -53,8 +58,13 @@ if let e = encodingName {
         "tight": [Encoding.tight, Encoding.raw], "zrle": [Encoding.zrle, Encoding.raw],
         "tightjpeg": [Encoding.tight, Encoding.raw, Encoding.jpegQuality(6)],
     ]
+    // tightjpegN: Tight with JPEG quality N (0-9).
+    if e.hasPrefix("tightjpeg"), let q = Int(e.dropFirst(9)), (0...9).contains(q) {
+        options.forcedEncodings = [Encoding.tight, Encoding.raw, Encoding.jpegQuality(q)] + pseudo
+    } else {
     guard let list = map[e] else { print("unknown encoding \(e)"); exit(2) }
     options.forcedEncodings = list + pseudo
+    }
 }
 
 let done = DispatchSemaphore(value: 0)
@@ -86,8 +96,9 @@ client = RFBClient(options: options, credentialProvider: { req in
         updates += 1
         if watch {
             let now = Date(), bytes = client.bytesReceived
-            print(String(format: "%7.2fs update %d (+%.2fs) total %llu B", now.timeIntervalSince(start), updates,
-                         now.timeIntervalSince(lastUpdate), bytes))
+            let took = client.activity().receivingFor ?? 0
+            print(String(format: "%7.2fs update %d (+%.2fs) took %.3fs total %llu B", now.timeIntervalSince(start), updates,
+                         now.timeIntervalSince(lastUpdate), took, bytes))
             lastUpdate = now
         }
         if updates == 1 { print(String(format: "first update after %.2fs, %d bytes", Date().timeIntervalSince(start), client.bytesReceived)) }
@@ -147,6 +158,13 @@ if let limitAfter {
     client.setBandwidthLimit(limit)
 }
 client.start()
+for (t, syms) in keyTimes {
+    DispatchQueue.global().asyncAfter(deadline: .now() + t) {
+        print(String(format: "%7.2fs keys %@", Date().timeIntervalSince(start), syms.map { String($0, radix: 16) }.joined(separator: "+")))
+        syms.forEach { client.sendKey($0, down: true) }
+        syms.reversed().forEach { client.sendKey($0, down: false) }
+    }
+}
 let ping = DispatchSource.makeTimerSource(queue: .global())
 if watch {
     ping.schedule(deadline: .now() + 2, repeating: 2)

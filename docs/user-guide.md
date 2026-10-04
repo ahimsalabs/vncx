@@ -190,7 +190,7 @@ Hold ⌥ while dropping to type the text key by key instead. Typing only covers 
 
 | Setting | Behavior |
 |---|---|
-| **Automatic** (default) | Measures the link while it works. Lossless on fast, low-latency links; switches to JPEG (quality 8, then 4) as the link slows or latency rises, and back again. Changes are smoothed: it downgrades after about 3 seconds of evidence and upgrades after about 6, so it doesn't flap. |
+| **Automatic** (default) | Picks the best level at which a full-screen repaint (a tab switch, a new window) would arrive within half a second, judged from the remote's size and the measured delivery rate. A 1440p remote on a fast link stays lossless; a 5K desktop on a 100 Mbit/s link uses Balanced, where lossless would make every tab switch an 8 to 12 MB update. Changes are smoothed: it downgrades after about 3 seconds of evidence and upgrades after about 6, so it doesn't flap. |
 | **Best (lossless)** | Always lossless (ZRLE or Tight without JPEG). |
 | **Balanced** | Tight with JPEG quality 8. |
 | **Low bandwidth** | Tight with JPEG quality 4 and stronger compression. |
@@ -205,7 +205,7 @@ When vncx knows it's waiting, a small indicator appears in the bottom-left corne
 
 | Setting | Behavior |
 |---|---|
-| **Automatic** (default) | No limit until latency shows the connection queueing (more than 40 ms over its baseline), then about 70% of the recent throughput. It rises again by 15% steps while latency stays low and the limit is what holds throughput back, up to the measured link speed. Needs a server with fences (WayVNC, TigerVNC, ReFrame). |
+| **Automatic** (default) | No limit from vncx. Servers with continuous updates and fences (WayVNC, TigerVNC) pace themselves to the link. Pacing requests from the client has preceded long stalls with WayVNC, so vncx only does it when you pick a fixed limit. |
 | **Unlimited** | Continuous updates whenever the server supports them. |
 | **50, 20, 10 or 5 Mbit/s** | A fixed limit. |
 

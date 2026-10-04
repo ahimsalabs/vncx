@@ -21,7 +21,8 @@ enum PasteShortcut: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// A cap on how fast the server sends. Automatic backs off when latency shows the path is queueing.
+/// A cap on how fast the server sends. Automatic leaves it to the server: WayVNC and TigerVNC pace themselves with
+/// fences, and pacing requests from the client (as a fixed limit does) has preceded long stalls with WayVNC.
 enum BandwidthLimit: String, Codable, CaseIterable, Identifiable {
     case automatic, unlimited, mbit50, mbit20, mbit10, mbit5
     var id: String { rawValue }

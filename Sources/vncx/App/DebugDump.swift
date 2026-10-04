@@ -37,7 +37,7 @@ enum DebugDump {
             "cmd": (55, .command), "ctrl": (59, .control), "opt": (58, .option), "shift": (56, .shift)]
         let keys: [String: (code: UInt16, chars: String)] = [
             "up": (126, "\u{F700}"), "down": (125, "\u{F701}"), "left": (123, "\u{F702}"), "right": (124, "\u{F703}"),
-            "t": (17, "t"), "tab": (48, "\t"), "space": (49, " ")]
+            "t": (17, "t"), "w": (13, "w"), "tab": (48, "\t"), "space": (49, " ")]
         let parts = spec.split(separator: "+").map(String.init)
         guard let keyName = parts.last, let key = keys[keyName] else { return }
         window.makeFirstResponder(view)

@@ -27,7 +27,7 @@ vncx is an AppKit and SwiftUI app with a Metal renderer, not a cross-platform to
 
 ### Network resilience
 
-- **Automatic quality** from measured link rate and fence round-trip time, switching between lossless and JPEG with hysteresis.
+- **Automatic quality** from the remote's size and the measured delivery rate, so a full-screen repaint stays under half a second, switching between lossless and JPEG with hysteresis.
 - **Continuous updates and fences** with servers that support them, for lower latency than request-per-frame polling.
 - **Automatic reconnect** after drops, sleep and network changes, with in-memory credentials so you aren't prompted again.
 - **Live stats:** frame rate, bandwidth, link estimate, latency and encoding mix.

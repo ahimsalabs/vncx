@@ -682,9 +682,6 @@ final class Session: Identifiable {
     @ObservationIgnored private var lastSnapshot: RFBStats?
     @ObservationIgnored private var statsTick = 0
     @ObservationIgnored private var pendingLevel: (level: Quality, count: Int)?
-    @ObservationIgnored private var rttSamples: [Double] = []
-    @ObservationIgnored private var throughputSamples: [Double] = []
-    @ObservationIgnored private var autoLimit: Double?
 
     private func startStats() {
         statsTimer?.invalidate()
@@ -692,9 +689,6 @@ final class Session: Identifiable {
         lastSnapshot = nil
         statsTick = 0
         pendingLevel = nil
-        rttSamples = []
-        throughputSamples = []
-        autoLimit = nil
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.statsTimerFired()
         }
@@ -747,43 +741,26 @@ final class Session: Identifiable {
         if text != throughput { throughput = text }
 
         if config.quality == .auto { adjustQuality(now) }
-        throughputSamples.append(live.bitsPerSecond)
-        if throughputSamples.count > 5 { throughputSamples.removeFirst() }
-        // Latency is measured on odd ticks; judge it on the following one.
-        if config.bandwidth == .automatic && statsTick % 2 == 0 { adjustBandwidth(now) }
     }
 
-    /// Automatic bandwidth limit, a delay-based controller. The latency fence queues behind frame data, so a round
-    /// trip well above the connection's baseline means the server is sending faster than the path drains: back off
-    /// multiplicatively. While latency stays near the baseline and the limit is what holds throughput back, raise
-    /// it gradually, up to the measured link rate. The limit stays for the session: paced updates keep at most one
-    /// frame in flight, so they can't build the queues that continuous updates did.
-    private func adjustBandwidth(_ st: RFBStats) {
-        guard let rtt = st.rtt else { return } // servers without fences
-        rttSamples.append(rtt)
-        if rttSamples.count > 30 { rttSamples.removeFirst() } // about a minute
-        let queueing = rtt - (rttSamples.min() ?? rtt)
-        let recent = throughputSamples.max() ?? 0
-        var limit = autoLimit
-        if queueing > 0.04 {
-            limit = max(2e6, min(autoLimit ?? .infinity, max(recent, 2e6)) * 0.7)
-        } else if let l = autoLimit, queueing < 0.015, recent > l * 0.7 {
-            limit = min(l * 1.15, max(l, st.linkRate.map { $0 * 8 } ?? .infinity))
-        }
-        guard limit != autoLimit else { return }
-        autoLimit = limit
-        client?.setBandwidthLimit(limit)
-    }
-
-    /// Automatic quality: lossless on fast links, JPEG as the link slows. Downgrades after 3 s of evidence,
-    /// upgrades after 6 s, so it doesn't flap.
+    /// Automatic quality: the best level at which a full-screen repaint would arrive within half a second, from the
+    /// screen size, typical bytes per pixel at each level, and the measured delivery rate. Raw link speed alone
+    /// picks lossless for a 5K desktop on a fast link, where a tab switch then costs 8 to 12 MB and seconds.
+    /// Downgrades after 3 s of evidence, upgrades after 6 s, so it doesn't flap.
     private func adjustQuality(_ st: RFBStats) {
-        guard let link = st.linkRate.map({ $0 * 8 / 1e6 }) else { return } // Mbit/s; unknown until a big update
-        let rtt = (st.rtt ?? 0) * 1000
-        let target: Quality
-        if link >= 40 && rtt < 60 { target = .lossless }
-        else if link >= 8 && rtt < 200 { target = .balanced }
-        else { target = .low }
+        guard let rate = st.linkRate.map({ $0 * 8 }), rate > 0 else { return } // bits/s; unknown until a big update
+        let pixels = Double(framebufferSize.width * framebufferSize.height)
+        let rtt = st.rtt ?? 0
+        func repaintSeconds(_ q: Quality) -> Double {
+            let bytesPerPixel: Double
+            switch q {
+            case .lossless, .auto: bytesPerPixel = 0.6 // ZRLE on a typical desktop
+            case .balanced: bytesPerPixel = 0.12
+            case .low: bytesPerPixel = 0.06
+            }
+            return pixels * bytesPerPixel * 8 / rate + rtt
+        }
+        let target = [Quality.lossless, .balanced].first { repaintSeconds($0) <= 0.5 } ?? .low
         guard target != st.level else { pendingLevel = nil; return }
         let count = (pendingLevel?.level == target ? pendingLevel!.count : 0) + 1
         pendingLevel = (target, count)
