@@ -152,6 +152,8 @@ package struct RFBStats: Sendable {
     package var level: Quality = .lossless
     /// Pixels covered by framebuffer rectangles (not pseudo-encodings), for bytes per pixel.
     package var pixels: UInt64 = 0
+    /// The screen is moving and updates are being sent at the motion level (see `motionLevel`).
+    package var inMotion = false
     /// The bandwidth limit in force (bits/s), nil when unlimited.
     package var limit: Double?
 }
@@ -250,6 +252,20 @@ package final class RFBClient: @unchecked Sendable {
     private var serverCU = false
     /// A latency fence is due as soon as the server holds no requests.
     private var fenceWanted = false
+    /// Motion quality: while large updates arrive in quick succession (scrolling, dragging), send at this level
+    /// instead of `level`, then re-request the area that moved at `level` once it settles. Scrolling a text page on a
+    /// large WayVNC desktop ran at 3.8 updates/s at JPEG 8 and 8 at JPEG 4. nil turns it off.
+    private var motionLevel: Quality?
+    private var inMotion = false
+    private var lastLargeUpdateAt: UInt64 = 0
+    private var settledAt: UInt64 = 0
+    /// Cells of `motionCell` points that changed during motion; a bounding box would take in a clock ticking on
+    /// another display and turn a viewport refresh into a whole-desktop one.
+    private var motionCells = Set<Int>()
+    private static let motionCell = 128
+    private static let largeUpdatePixels = 250_000
+    private static let motionGap = 0.3
+    private static let settleAfter = 0.5
     private let pacer = DispatchQueue(label: "vncx.pacer", qos: .userInteractive)
 
     package func statsSnapshot() -> RFBStats {
@@ -259,6 +275,7 @@ package final class RFBClient: @unchecked Sendable {
             s.continuousUpdates = cuEnabled && !cuStopping
             s.fenceSupported = fenceSupported
             s.level = level
+            s.inMotion = inMotion
             s.limit = limit
             // An unanswered fence is at least as slow as its age, so a stalled stream shows rising latency.
             if let sent = fencePendingSince {
@@ -272,11 +289,115 @@ package final class RFBClient: @unchecked Sendable {
     /// Changes the picture quality mid-session (re-sends SetEncodings). `.auto` is not a level.
     package func setQualityLevel(_ q: Quality) {
         guard q != .auto else { return }
-        let changed = lock.withLock { () -> Bool in defer { level = q }; return level != q }
+        let (changed, moving) = lock.withLock { () -> (Bool, Bool) in defer { level = q }; return (level != q, inMotion) }
         if changed {
             flowLog.notice("quality -> \(q.rawValue, privacy: .public)")
-            sendEncodings()
+            if !moving { sendEncodings() } // otherwise it takes effect when the motion settles
         }
+    }
+
+    /// Sets the level used while the screen is moving (nil for none). Only applies when it's below `level`.
+    package func setMotionLevel(_ q: Quality?) {
+        lock.withLock { motionLevel = q }
+    }
+
+    /// Called after each update with its size and area. Two large updates within `motionGap` start motion; the
+    /// settle check ends it.
+    private func noteUpdate(pixels: Int, rects: [CGRect]) {
+        guard pixels >= Self.largeUpdatePixels, let fb = framebuffer else { return }
+        // A full refresh (the first update, ⌃⌘R, a settle refresh of most of the screen) isn't motion.
+        guard pixels < fb.width * fb.height * 3 / 4 else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        let start = lock.withLock { () -> Bool in
+            defer { lastLargeUpdateAt = now }
+            if inMotion { markMotionCells(rects, width: fb.width); return false }
+            guard let m = motionLevel, m.rank < level.rank,
+                  Double(now &- lastLargeUpdateAt) / 1e9 < Self.motionGap,
+                  Double(now &- settledAt) / 1e9 > Self.motionGap * 2 else { return false }
+            inMotion = true
+            motionCells = []
+            markMotionCells(rects, width: fb.width)
+            return true
+        }
+        guard start else { return }
+        flowLog.info("motion: sending at the motion level")
+        sendEncodings()
+        scheduleSettleCheck()
+    }
+
+    private func scheduleSettleCheck() {
+        pacer.asyncAfter(deadline: .now() + Self.settleAfter / 2) { [weak self] in self?.settleIfStill() }
+    }
+
+    /// Ends motion once no large update has arrived for `settleAfter`: back to `level`, and ask for the area that
+    /// moved again in full so it's redrawn at that level.
+    private func settleIfStill() {
+        guard !transport.isCancelled, let fb = framebuffer else { return }
+        enum Settle { case notMoving, stillMoving, settled([CGRect]) }
+        let settle = lock.withLock { () -> Settle in
+            guard inMotion else { return .notMoving }
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard Double(now &- lastLargeUpdateAt) / 1e9 >= Self.settleAfter else { return .stillMoving }
+            inMotion = false
+            settledAt = now
+            defer { motionCells = [] }
+            return .settled(motionRects(width: fb.width, height: fb.height))
+        }
+        switch settle {
+        case .notMoving: return
+        case .stillMoving: return scheduleSettleCheck()
+        case .settled(let rects):
+            let px = rects.reduce(0) { $0 + Int($1.width * $1.height) }
+            flowLog.info("motion settled: refreshing \(rects.count) rects, \(px / 1000) kpx")
+            sendEncodings()
+            lock.withLock {
+                for r in rects {
+                    serverPending += 1
+                    transport.send([3, 0] + be16(Int(r.minX)) + be16(Int(r.minY)) + be16(Int(r.width)) + be16(Int(r.height)))
+                }
+            }
+        }
+    }
+
+    /// Caller holds `lock`.
+    private func markMotionCells(_ rects: [CGRect], width: Int) {
+        let cols = (width + Self.motionCell - 1) / Self.motionCell
+        for r in rects {
+            for cy in Int(r.minY) / Self.motionCell...max(Int(r.minY), Int(r.maxY) - 1) / Self.motionCell {
+                for cx in Int(r.minX) / Self.motionCell...max(Int(r.minX), Int(r.maxX) - 1) / Self.motionCell {
+                    motionCells.insert(cy * cols + cx)
+                }
+            }
+        }
+    }
+
+    /// The changed cells as a few rectangles: runs along each row, stacked when consecutive rows match. Caller
+    /// holds `lock`.
+    private func motionRects(width: Int, height: Int) -> [CGRect] {
+        Self.cellRects(motionCells, cell: Self.motionCell, width: width, height: height)
+    }
+
+    /// Turns marked grid cells (index row × columns + column) into rectangles in pixels.
+    package static func cellRects(_ cells: Set<Int>, cell c: Int, width: Int, height: Int) -> [CGRect] {
+        let cols = (width + c - 1) / c, rows = (height + c - 1) / c
+        var runs: [(x0: Int, x1: Int, y0: Int, y1: Int)] = []
+        for row in 0..<rows {
+            var col = 0
+            while col < cols {
+                guard cells.contains(row * cols + col) else { col += 1; continue }
+                let start = col
+                while col < cols, cells.contains(row * cols + col) { col += 1 }
+                if let i = runs.lastIndex(where: { $0.x0 == start && $0.x1 == col && $0.y1 == row }) {
+                    runs[i].y1 = row + 1
+                } else {
+                    runs.append((start, col, row, row + 1))
+                }
+            }
+        }
+        let full = CGRect(x: 0, y: 0, width: width, height: height)
+        let rects = runs.map { CGRect(x: $0.x0 * c, y: $0.y0 * c, width: ($0.x1 - $0.x0) * c, height: ($0.y1 - $0.y0) * c).intersection(full) }
+        // Many scattered pieces: one box is cheaper than dozens of requests.
+        return rects.count > 16 ? [rects.reduce(CGRect.null) { $0.union($1) }] : rects
     }
 
     /// Sends a fence carrying a timestamp; the reply gives the round-trip time.
@@ -626,7 +747,7 @@ package final class RFBClient: @unchecked Sendable {
         let startBytes = consumed - 1
         let startTime = DispatchTime.now().uptimeNanoseconds
         var rectCounts: [Int32: Int] = [:], rectBytes: [Int32: UInt64] = [:]
-        var rectPixels: UInt64 = 0
+        var rectPixels: UInt64 = 0, rectList: [CGRect] = []
         var lastProgress = startTime
         lock.withLock { updateSince = (startTime, startBytes); requestSince = nil }
         defer { lock.withLock { updateSince = nil } }
@@ -642,7 +763,7 @@ package final class RFBClient: @unchecked Sendable {
             defer {
                 rectCounts[enc, default: 0] += 1
                 rectBytes[enc, default: 0] += consumed &- rectStart
-                if enc >= 0 { rectPixels += UInt64(w * h) }
+                if enc >= 0 { rectPixels += UInt64(w * h); rectList.append(CGRect(x: x, y: y, width: w, height: h)) }
                 // Rectangles land in the framebuffer as they decode, so a big update (a full refresh, or video on a
                 // slow link) can be shown filling in instead of all at once at the end. About once per display frame.
                 let now = DispatchTime.now().uptimeNanoseconds
@@ -690,6 +811,7 @@ package final class RFBClient: @unchecked Sendable {
             if fenceWanted && serverPending == 0 { sendLatencyFenceLocked() }
             return cuEnabled
         }
+        noteUpdate(pixels: Int(rectPixels), rects: rectList)
         if !continuous { requestNext(after: total) }
         onEvent(.updated)
     }
@@ -823,7 +945,10 @@ package final class RFBClient: @unchecked Sendable {
             transport.send(msg)
             return
         }
-        let current = lock.withLock { level }
+        let current = lock.withLock { () -> Quality in
+            if inMotion, let m = motionLevel, m.rank < level.rank { return m }
+            return level
+        }
         var encs: [Int32] = [Encoding.copyRect]
         switch current {
         case .lossless, .auto: encs += [Encoding.zrle, Encoding.tight]

@@ -437,7 +437,7 @@ struct StatsOverlay: View {
             row("Link", stats.linkBitsPerSecond.map(rate) ?? "measuring…")
             row("Latency", stats.rttMs.map { String(format: "%.1f ms", $0) } ?? "n/a")
             row("Encoding", stats.encodings.isEmpty ? "–" : stats.encodings.map { "\($0.name) \(Int(($0.share * 100).rounded()))%" }.joined(separator: ", "))
-            row("Quality", (auto ? "Auto · " : "") + stats.level.label)
+            row("Quality", (auto ? "Auto · " : "") + stats.level.label + (stats.inMotion ? " · moving: JPEG 4" : ""))
         }
         .font(.system(size: 11, design: .monospaced))
         .padding(10)

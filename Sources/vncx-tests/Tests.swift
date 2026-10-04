@@ -217,3 +217,19 @@ struct QualityTests {
         expect(Quality.levels.map(\.rank) == Array((0...10).reversed()), "levels run from lossless down to JPEG 0")
     }
 }
+
+struct MotionTests {
+    func cellRects() {
+        // 10×5 grid of 100-pixel cells over a 1000×450 framebuffer (the last row is clipped to 50 pixels).
+        let cols = 10
+        var cells = Set<Int>()
+        for row in 1...3 { for col in 2...4 { cells.insert(row * cols + col) } } // a 3×3 block
+        cells.insert(4 * cols + 9) // a lone cell in the clipped bottom-right corner
+        let rects = RFBClient.cellRects(cells, cell: 100, width: 1000, height: 450)
+        expect(rects == [CGRect(x: 200, y: 100, width: 300, height: 300), CGRect(x: 900, y: 400, width: 100, height: 50)],
+               "block merges into one rect, corner cell is clipped: \(rects)")
+        // Rows with different spans stay separate.
+        let stairs = RFBClient.cellRects([0, 1, 11], cell: 100, width: 1000, height: 450)
+        expect(stairs == [CGRect(x: 0, y: 0, width: 200, height: 100), CGRect(x: 100, y: 100, width: 100, height: 100)], "\(stairs)")
+    }
+}

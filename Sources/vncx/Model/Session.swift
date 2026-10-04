@@ -368,6 +368,7 @@ final class Session: Identifiable {
         })
         self.client = client
         client.setBandwidthLimit(config.bandwidth.bitsPerSecond)
+        client.setMotionLevel(config.quality == .auto ? Self.lowestAutomatic : nil)
         client.start()
     }
 
@@ -670,9 +671,10 @@ final class Session: Identifiable {
         var level: Quality = .lossless
         var continuous = false
         var limit: Double?
+        var inMotion = false
         static func == (a: LiveStats, b: LiveStats) -> Bool {
             a.fps == b.fps && a.bitsPerSecond == b.bitsPerSecond && a.linkBitsPerSecond == b.linkBitsPerSecond
-                && a.rttMs == b.rttMs && a.level == b.level && a.continuous == b.continuous && a.limit == b.limit
+                && a.rttMs == b.rttMs && a.level == b.level && a.continuous == b.continuous && a.limit == b.limit && a.inMotion == b.inMotion
                 && a.encodings.map(\.name) == b.encodings.map(\.name) && a.encodings.map(\.share) == b.encodings.map(\.share)
         }
     }
@@ -715,6 +717,7 @@ final class Session: Identifiable {
         live.level = now.level
         live.continuous = now.continuousUpdates
         live.limit = now.limit
+        live.inMotion = now.inMotion
         let deltas = now.rectBytes.map { (Encoding.name($0.key), Double($0.value &- (prev.rectBytes[$0.key] ?? 0))) }
             .filter { $0.1 > 0 && !$0.0.hasPrefix("-") }
         let total = deltas.reduce(0) { $0 + $1.1 }
@@ -777,7 +780,7 @@ final class Session: Identifiable {
     private func adjustQuality(_ st: RFBStats, previous prev: RFBStats) {
         // Learn from about a megapixel or more of updates at one level.
         let pixels = st.pixels &- prev.pixels
-        if pixels > 1_000_000, st.level == prev.level, let typical = Self.typicalBytesPerPixel[st.level] {
+        if pixels > 1_000_000, st.level == prev.level, !st.inMotion, !prev.inMotion, let typical = Self.typicalBytesPerPixel[st.level] {
             let bytes = st.rectBytes.filter { $0.key >= 0 }.reduce(0.0) { $0 + Double($1.value &- (prev.rectBytes[$1.key] ?? 0)) }
             let observed = min(max(bytes / Double(pixels) / typical, 0.25), 4)
             bytesPerPixelCorrection = bytesPerPixelCorrection * 0.7 + observed * 0.3

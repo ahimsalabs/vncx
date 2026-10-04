@@ -5,7 +5,7 @@
 // Exercises auth and decoders against real servers without the UI.
 //
 //   vncx-probe host[:port] [--password PW] [--user NAME] [--encoding raw|copyrect|rre|hextile|zlib|tight|zrle|tightjpeg]
-//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--limit MBIT] [--limit-after S] [--key-at T:SYMS ...] [--scroll-at T:X,Y,CLICKS ...] [--watch]
+//              [--frames N] [--seconds S] [--out file.png] [--resize WxH] [--quality Q] [--limit MBIT] [--limit-after S] [--key-at T:SYMS ...] [--scroll-at T:X,Y,CLICKS ...] [--motion] [--watch]
 import Foundation
 import Network
 import CoreGraphics
@@ -47,6 +47,9 @@ let keyCombo = option("--keys")
 let move = args.contains("--move")
 args.removeAll { $0 == "--move" }
 /// Logs every update with its time and size, and measures latency every 2 s like the app does.
+/// Motion quality as Automatic uses it: JPEG 4 while the screen moves.
+let motion = args.contains("--motion")
+args.removeAll { $0 == "--motion" }
 let watch = args.contains("--watch")
 args.removeAll { $0 == "--watch" }
 var lastUpdate = Date()
@@ -164,6 +167,7 @@ if let limitAfter {
 } else {
     client.setBandwidthLimit(limit)
 }
+if motion { client.setMotionLevel(.jpeg(4)) }
 client.start()
 for (t, syms) in keyTimes {
     DispatchQueue.global().asyncAfter(deadline: .now() + t) {

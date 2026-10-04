@@ -38,6 +38,7 @@ run("ZRLE tile subencodings") { try DecoderTests().zrleTiles() }
 run("Tight palette and gradient filters") { try DecoderTests().tightFilters() }
 run("Wake-on-LAN MAC parsing and packet") { WakeTests().macParsing() }
 run("Picture quality raw values and order") { try QualityTests().rawValues() }
+run("Motion refresh rectangles from grid cells") { MotionTests().cellRects() }
 
 print(failures == 0 ? "all tests passed" : "\(failures) failure(s)")
 exit(failures == 0 ? 0 : 1)
