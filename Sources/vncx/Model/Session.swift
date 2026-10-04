@@ -729,6 +729,14 @@ final class Session: Identifiable {
             live.encodings = liveStats.encodings // keep showing the last mix while idle
         }
         if live != liveStats { liveStats = live }
+        let act = client.activity()
+        func ms(_ t: Double?) -> Int { t.map { Int($0 * 1000) } ?? -1 }
+        flowLog.info("""
+            fps=\(live.fps) kbit=\(Int(live.bitsPerSecond / 1000)) limit=\(Int((now.limit ?? 0) / 1000)) \
+            cu=\(now.continuousUpdates) level=\(now.level.rawValue, privacy: .public) rtt=\(ms(now.rtt)) \
+            req=\(ms(act.requestOutstandingFor)) paced=\(ms(act.pacedFor)) recv=\(ms(act.receivingFor)) \
+            fence=\(ms(act.fenceUnansweredFor)) waiting=\(String(describing: self.waiting), privacy: .public)
+            """)
 
         let text: String
         switch live.bitsPerSecond {

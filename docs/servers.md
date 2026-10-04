@@ -44,6 +44,10 @@ wayvnc --desktop 0.0.0.0 5901
 
 WayVNC then reports each output as a separate screen, and vncx's [Displays menu](user-guide.md#multiple-displays) can show all, show one, or put each in its own window. Without `--desktop`, WayVNC captures a single output and there's no protocol-level way to switch. Its first output isn't necessarily the one you want; the order follows the compositor, not the layout. In a test with two side-by-side outputs, WayVNC listed the right-hand one first. vncx orders displays by position.
 
+**Fences and pending requests.** neatvnc (1.0.1 at least) stops reading a client's messages for good when a fence request arrives while it still holds a FramebufferUpdateRequest: further update requests, keys and pointer events go unread, and the picture freezes except for the one pending update. vncx counts the requests the server holds and only sends its latency fence when there are none. Other clients that send fences freely can hit this.
+
+**Large updates.** neatvnc's Tight encoder sends every changed 64×64 tile as a separate JPEG with its own headers, about 830 bytes per tile even at low quality, so full-screen video on a large desktop can take 70 Mbit/s or more. The [bandwidth limit](user-guide.md#picture-quality-and-connection-stats) keeps it in check.
+
 **Start it on demand:** set up [SSH](user-guide.md#ssh) for the computer and pick the **WayVNC (all displays)** start-command preset. It finds your Wayland session's socket and starts `wayvnc --desktop` on the connection's port if it isn't already running.
 
 **Cursor shapes** depend on the compositor supporting cursor capture. Under sway, WayVNC 0.10 sends them. On the niri machine tested here, a single-output WayVNC sent none. Try `--desktop`, or set **Local cursor**. WayVNC's `-r` / `--render-cursor` draws the cursor into the picture instead.
