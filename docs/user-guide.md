@@ -201,6 +201,8 @@ JPEG only applies to servers that support Tight encoding. macOS Screen Sharing d
 
 Large updates are drawn as they stream in rather than when the last part arrives, so a full refresh fills in progressively on a slow link.
 
+When vncx knows it's waiting, a small indicator appears in the bottom-left corner: **Waiting for *computer*…** when a latency check has gone unanswered for over a second (the server or network has stalled), **Receiving…** with the size so far when one update has been streaming in for over 0.4 seconds, and **Bandwidth limit** when the limit has held the next request back for over 0.4 seconds. A remote screen that simply isn't changing shows nothing.
+
 | Setting | Behavior |
 |---|---|
 | **Automatic** (default) | No limit until latency shows the connection queueing (more than 40 ms over its baseline), then about 70% of the recent throughput. It rises again by 15% steps while latency stays low and the limit is what holds throughput back, up to the measured link speed. Needs a server with fences (WayVNC, TigerVNC, ReFrame). |

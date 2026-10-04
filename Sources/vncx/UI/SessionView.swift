@@ -77,11 +77,19 @@ struct SessionView: View {
                     .padding(12)
                     .allowsHitTesting(false)
             }
+            if let waiting = session.waiting {
+                WaitingIndicator(waiting: waiting, host: session.config.title)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(12)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
             if chrome.island {
                 FloatingBar(session: session, displayID: displayID, chrome: chrome)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
+        .animation(.easeInOut(duration: 0.15), value: session.waiting)
         .coordinateSpace(.named(FloatingBar.space))
         .background(Color.black)
         .ignoresSafeArea(.container, edges: .bottom)
@@ -382,6 +390,32 @@ struct CredentialsSheet: View {
         .padding(20)
         .frame(width: 440)
         .onAppear { focus = prompt.request.needsUsername && username.isEmpty ? .user : .password }
+    }
+}
+
+/// A small "still working" pill for waits vncx knows about (see `Session.Waiting`).
+struct WaitingIndicator: View {
+    let waiting: Session.Waiting
+    let host: String
+
+    private var text: String {
+        switch waiting {
+        case .server: return "Waiting for \(host)…"
+        case .receiving(let bytes):
+            return "Receiving… " + ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary)
+        case .limited(let bps): return String(format: "Bandwidth limit · %.0f Mbit/s", bps / 1e6)
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ProgressView().controlSize(.mini)
+            Text(text).monospacedDigit()
+        }
+        .font(.caption)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .environment(\.colorScheme, .dark)
     }
 }
 

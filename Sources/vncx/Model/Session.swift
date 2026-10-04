@@ -46,6 +46,35 @@ final class Session: Identifiable {
     var banner: Banner?
     @ObservationIgnored private var bannerWork: DispatchWorkItem?
 
+    /// Something vncx knows it's waiting on, shown as a small indicator after a short delay.
+    enum Waiting: Equatable {
+        case server
+        case receiving(bytes: UInt64)
+        case limited(Double)
+    }
+    private(set) var waiting: Waiting?
+    @ObservationIgnored private var waitTimer: Timer?
+    @ObservationIgnored private var waitingShownAt: Date?
+
+    private func updateWaiting() {
+        var w: Waiting?
+        if phase == .connected, let a = client?.activity() {
+            if let t = a.fenceUnansweredFor, t > 1 { w = .server }
+            else if let t = a.receivingFor, t > 0.4 { w = .receiving(bytes: a.receivedBytes) }
+            else if let t = a.pacedFor, t > 0.4, let limit = a.limit { w = .limited(limit) }
+        }
+        // Once shown, stay up for at least half a second so it doesn't flicker.
+        if w == nil, let shown = waitingShownAt, Date().timeIntervalSince(shown) < 0.5 { return }
+        if w != nil && waiting == nil { waitingShownAt = Date() }
+        if w != waiting { waiting = w }
+    }
+
+    private func stopWaitingIndicator() {
+        waitTimer?.invalidate()
+        waitTimer = nil
+        waiting = nil
+    }
+
     func showBanner(_ b: Banner?, for seconds: TimeInterval? = nil) {
         bannerWork?.cancel()
         banner = b
@@ -357,6 +386,7 @@ final class Session: Identifiable {
         statusDetail = nil
         saveThumbnail()
         statsTimer?.invalidate()
+        stopWaitingIndicator()
         if phase != .disconnected(nil) { phase = .disconnected(nil) }
     }
 
@@ -466,6 +496,7 @@ final class Session: Identifiable {
             desktopName = name
         case .disconnected(let error):
             statsTimer?.invalidate()
+        stopWaitingIndicator()
             watchdog?.cancel()
             let wasConnected = phase == .connected
             if wasConnected { saveThumbnail() }
@@ -657,6 +688,7 @@ final class Session: Identifiable {
 
     private func startStats() {
         statsTimer?.invalidate()
+        stopWaitingIndicator()
         lastSnapshot = nil
         statsTick = 0
         pendingLevel = nil
@@ -665,6 +697,10 @@ final class Session: Identifiable {
         autoLimit = nil
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.statsTimerFired()
+        }
+        waitTimer?.invalidate()
+        waitTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            self?.updateWaiting()
         }
     }
 

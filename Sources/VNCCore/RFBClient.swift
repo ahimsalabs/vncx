@@ -68,6 +68,19 @@ package enum Quality: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// What the client is waiting on right now, for a "still working" indicator. Durations in seconds.
+package struct RFBActivity: Sendable {
+    /// How long the update now arriving has been streaming in, and its bytes so far.
+    package var receivingFor: Double?
+    package var receivedBytes: UInt64 = 0
+    /// How long the next request has been held back by the bandwidth limit.
+    package var pacedFor: Double?
+    package var limit: Double?
+    /// How long the oldest latency fence has gone unanswered. Its reply should come back within a round trip, so
+    /// a long wait means the server or the network has stalled.
+    package var fenceUnansweredFor: Double?
+}
+
 /// A snapshot of connection statistics for the stats overlay and automatic quality.
 package struct RFBStats: Sendable {
     package var bytes: UInt64 = 0
@@ -166,6 +179,9 @@ package final class RFBClient: @unchecked Sendable {
     /// Pacing allowance in bits: it refills at the limit, up to `burstSeconds` worth, and each update spends its size.
     private var tokens: Double = 0
     private var tokensAt: UInt64 = 0
+    /// When the current paced wait began, and when the update now streaming in began (and its first byte).
+    private var pacedSince: UInt64?
+    private var updateSince: (time: UInt64, bytes: UInt64)?
     /// When the oldest unanswered latency fence was sent.
     private var fencePendingSince: UInt64?
     /// A latency fence to send just before the next update request (see `measureLatency`).
@@ -198,6 +214,20 @@ package final class RFBClient: @unchecked Sendable {
     }
 
     /// Sends a fence carrying a timestamp; the reply gives the round-trip time.
+    package func activity() -> RFBActivity {
+        let now = DispatchTime.now().uptimeNanoseconds
+        func age(_ t: UInt64?) -> Double? { t.map { Double(now &- $0) / 1e9 } }
+        return lock.withLock {
+            var a = RFBActivity()
+            a.receivingFor = age(updateSince?.time)
+            if let u = updateSince { a.receivedBytes = transport.bytesReceived &- u.bytes }
+            a.pacedFor = age(pacedSince)
+            a.limit = limit
+            a.fenceUnansweredFor = age(fencePendingSince)
+            return a
+        }
+    }
+
     /// When polling, the fence waits for the next update request instead: some servers (WayVNC) hold a fence reply
     /// behind an outstanding request until the screen changes, which would read as seconds of latency.
     package func measureLatency() {
@@ -258,6 +288,7 @@ package final class RFBClient: @unchecked Sendable {
             return tokens < 0 ? -tokens / limit : 0
         }
         guard wait > 0 else { return requestUpdate(incremental: true) }
+        lock.withLock { pacedSince = now }
         pacer.asyncAfter(deadline: .now() + wait) { [weak self] in
             guard let self, !self.transport.isCancelled else { return }
             self.requestUpdate(incremental: true)
@@ -519,6 +550,8 @@ package final class RFBClient: @unchecked Sendable {
         let startTime = DispatchTime.now().uptimeNanoseconds
         var rectCounts: [Int32: Int] = [:], rectBytes: [Int32: UInt64] = [:]
         var lastProgress = startTime
+        lock.withLock { updateSince = (startTime, startBytes) }
+        defer { lock.withLock { updateSince = nil } }
         try transport.skip(1)
         let count = Int(try transport.u16())
         var i = 0
@@ -729,6 +762,7 @@ package final class RFBClient: @unchecked Sendable {
     package func requestUpdate(incremental: Bool) {
         guard let fb = framebuffer else { return }
         let fence = lock.withLock { () -> Bool in
+            pacedSince = nil
             defer { fenceBeforeRequest = false }
             return fenceBeforeRequest
         }
